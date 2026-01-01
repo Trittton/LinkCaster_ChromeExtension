@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python create-png-icons.py:*)",
+      "Bash(cmd /c generate-icons.bat)",
+      "Bash(powershell -Command:*)",
+      "Bash(dir /b:*)",
+      "Bash(cmd /c dir:*)",
+      "Bash(del:*)",
+      "Bash(dir:*)",
+      "Bash(git init:*)",
+      "Bash(git remote add:*)",
+      "Bash(git add:*)"
+    ]
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "manifest_version": 3,
+  "name": "Image Link Converter",
+  "version": "1.0.0",
+  "description": "Convert image links from Lightshot and other services to vgy.me or Imgur",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "identity"
+  ],
+  "host_permissions": [
+    "https://prnt.sc/*",
+    "https://prntscr.com/*",
+    "https://lightshot.com/*",
+    "https://image.prntscr.com/*",
+    "https://catbox.moe/*",
+    "https://api.imgur.com/*",
+    "https://freeimage.host/*",
+    "https://www.flickr.com/*",
+    "https://api.flickr.com/*",
+    "https://up.flickr.com/*",
+    "https://vgy.me/*",
+    "https://gyazo.com/*",
+    "https://upload.gyazo.com/*",
+    "https://i.gyazo.com/*",
+    "https://*/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "background": {
+    "service_worker": "background.js"
+  }
+}
