@@ -91,9 +91,62 @@
 
     <!-- Upload Vid Tab -->
     <div id="tab-upload-vid" class="tab-content">
-      <div class="tab-placeholder">
-        <p>Upload videos to Google Drive</p>
-        <p style="font-size: 12px; color: var(--text-dimmed);">Coming soon...</p>
+      <div class="gdrive-section">
+        <div class="gdrive-header">
+          <h3>Google Drive Upload</h3>
+          <button id="gdrive-settings-btn" class="icon-btn small" title="Google Drive Settings">
+            <span>⚙️</span>
+            <span class="error-badge" id="gdrive-error-badge" style="display: none;"></span>
+          </button>
+        </div>
+
+        <!-- First-time connection prompt -->
+        <div class="gdrive-first-time" id="gdrive-first-time" style="display: none;">
+          <div class="gdrive-prompt-card">
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+              <span style="font-size: 20px;">🔐</span>
+              <strong style="font-size: 13px;">Connect Google Drive</strong>
+            </div>
+            <p style="font-size: 11px; color: var(--text-dimmed); margin: 0 0 8px 0;">
+              Videos will be uploaded to your Google Drive with shareable links.
+            </p>
+            <button id="gdrive-connect-first" class="primary" style="width: 100%;">
+              Connect to Google Drive
+            </button>
+          </div>
+        </div>
+
+        <!-- Settings Panel -->
+        <div class="gdrive-settings" id="gdrive-settings" style="display: none;">
+          <label>Google Drive Connection</label>
+          <div class="button-group" style="margin-top: 8px;">
+            <button id="gdrive-connect" class="primary">Connect to Google Drive</button>
+            <button id="gdrive-unlink" class="secondary" style="display: none;">Unlink</button>
+          </div>
+          <small id="gdrive-status" style="display: block; color: var(--text-dimmed); font-size: 11px; text-align: center; margin-top: 6px;"></small>
+        </div>
+
+        <!-- Upload section (visible when connected) -->
+        <div id="gdrive-upload-section" style="display: none;">
+          <div class="input-section">
+            <label>Select Video File</label>
+            <input type="file" id="video-file-input" accept="video/*" style="margin-bottom: 8px;">
+            <button id="upload-video-btn" class="primary" style="width: 100%;">Upload to Google Drive</button>
+          </div>
+
+          <div class="progress" id="video-progress" style="display: none;">
+            <div class="progress-bar">
+              <div class="progress-fill" id="video-progress-fill"></div>
+            </div>
+            <p id="video-progress-text">Uploading...</p>
+          </div>
+
+          <div class="output-section" id="video-output-section" style="display: none;">
+            <label>Video Link</label>
+            <textarea id="video-output-text" rows="3" readonly></textarea>
+            <button id="video-copy-btn" class="primary">Copy Link</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>

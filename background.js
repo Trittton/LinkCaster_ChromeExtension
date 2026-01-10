@@ -343,3 +343,98 @@ async function handleGyazoOAuth(config) {
     return { success: false, error: error.message };
   }
 }
+
+// ===== Google Drive OAuth and Upload =====
+
+const BACKEND_URL = 'https://web-production-674b.up.railway.app';
+let currentSession = null;
+
+// Handle Google Drive OAuth message
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === 'googleDriveOAuth') {
+    handleGoogleDriveOAuth()
+      .then(result => sendResponse(result))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
+
+  if (request.action === 'googleDriveUpload') {
+    handleGoogleDriveUpload(request.fileData, request.fileName, request.sessionId)
+      .then(result => sendResponse(result))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
+});
+
+async function handleGoogleDriveOAuth() {
+  try {
+    console.log('Starting Google Drive OAuth via backend...');
+
+    const startResponse = await fetch(`${BACKEND_URL}/auth/google/start`);
+    const { authUrl, sessionId } = await startResponse.json();
+
+    currentSession = sessionId;
+
+    try {
+      await chrome.identity.launchWebAuthFlow({
+        url: authUrl,
+        interactive: true
+      });
+      console.log('OAuth flow completed with redirect');
+    } catch (flowError) {
+      console.log('OAuth window closed, checking if auth succeeded...');
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
+      // Verify session is actually authenticated
+      const verifyResponse = await fetch(`${BACKEND_URL}/auth/verify/${sessionId}`);
+      const verifyData = await verifyResponse.json();
+
+      if (!verifyData.authenticated) {
+        throw new Error('Authentication was not completed. Please try again and complete the authorization.');
+      }
+      console.log('Session verified successfully');
+    }
+
+    // Store session ID and connection status
+    await chrome.storage.local.set({
+      googleDriveSessionId: sessionId,
+      googleDriveConnected: true,
+      googleDriveConnectedAt: Date.now()
+    });
+
+    return { success: true, sessionId: sessionId };
+  } catch (error) {
+    console.error('Google Drive OAuth error:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+async function handleGoogleDriveUpload(fileData, fileName, sessionId) {
+  try {
+    console.log(`Uploading ${fileName} to Google Drive...`);
+
+    const uploadResponse = await fetch(`${BACKEND_URL}/api/upload`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        sessionId: sessionId,
+        fileData: fileData,
+        fileName: fileName
+      })
+    });
+
+    const result = await uploadResponse.json();
+
+    if (!uploadResponse.ok) {
+      throw new Error(result.error || 'Upload failed');
+    }
+
+    console.log('Upload successful:', result.previewUrl);
+    return { success: true, url: result.previewUrl, fileId: result.fileId };
+  } catch (error) {
+    console.error('Google Drive upload error:', error);
+    return { success: false, error: error.message };
+  }
+}

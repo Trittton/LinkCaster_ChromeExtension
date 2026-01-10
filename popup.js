@@ -851,3 +851,237 @@ function updateProgress(current, total, message) {
   progressFill.style.width = percentage + '%';
   progressText.textContent = message;
 }
+
+// ===== Google Drive OAuth and Upload =====
+
+// DOM Elements for Google Drive
+const gdriveSettingsBtn = document.getElementById('gdrive-settings-btn');
+const gdriveSettings = document.getElementById('gdrive-settings');
+const gdriveConnect = document.getElementById('gdrive-connect');
+const gdriveUnlink = document.getElementById('gdrive-unlink');
+const gdriveStatus = document.getElementById('gdrive-status');
+const gdriveConnectFirst = document.getElementById('gdrive-connect-first');
+const gdriveFirstTime = document.getElementById('gdrive-first-time');
+const gdriveErrorBadge = document.getElementById('gdrive-error-badge');
+const gdriveUploadSection = document.getElementById('gdrive-upload-section');
+const videoFileInput = document.getElementById('video-file-input');
+const uploadVideoBtn = document.getElementById('upload-video-btn');
+const videoProgress = document.getElementById('video-progress');
+const videoProgressFill = document.getElementById('video-progress-fill');
+const videoProgressText = document.getElementById('video-progress-text');
+const videoOutputSection = document.getElementById('video-output-section');
+const videoOutputText = document.getElementById('video-output-text');
+const videoCopyBtn = document.getElementById('video-copy-btn');
+
+// Google Drive UI Update
+async function updateGDriveUI() {
+  const data = await chrome.storage.local.get(['googleDriveSessionId', 'googleDriveConnected', 'googleDriveConnectedAt']);
+  const isConnected = data.googleDriveSessionId && data.googleDriveConnected;
+
+  if (isConnected) {
+    // Hide first-time prompt
+    if (gdriveFirstTime) gdriveFirstTime.style.display = 'none';
+    if (gdriveErrorBadge) gdriveErrorBadge.style.display = 'none';
+    if (gdriveUploadSection) gdriveUploadSection.style.display = 'block';
+  } else {
+    // Show first-time prompt if never connected
+    const neverConnected = !data.googleDriveConnectedAt;
+    if (gdriveFirstTime && neverConnected) {
+      gdriveFirstTime.style.display = 'block';
+    }
+    // Show error badge if was connected before
+    if (gdriveErrorBadge && !neverConnected) {
+      gdriveErrorBadge.style.display = 'block';
+    }
+    if (gdriveUploadSection) gdriveUploadSection.style.display = 'none';
+  }
+
+  await updateGDriveStatus();
+}
+
+async function updateGDriveStatus() {
+  if (!gdriveStatus) return;
+
+  const data = await chrome.storage.local.get(['googleDriveSessionId', 'googleDriveConnected']);
+  const isConnected = data.googleDriveSessionId && data.googleDriveConnected;
+
+  if (isConnected) {
+    gdriveStatus.textContent = '✓ Connected';
+    gdriveStatus.style.color = '#38ef7d';
+    if (gdriveConnect) {
+      gdriveConnect.textContent = 'Reconnect';
+      gdriveConnect.classList.remove('primary');
+      gdriveConnect.classList.add('secondary');
+    }
+    if (gdriveUnlink) {
+      gdriveUnlink.style.display = 'inline-block';
+    }
+  } else {
+    gdriveStatus.textContent = 'Not connected';
+    gdriveStatus.style.color = 'var(--text-dimmed)';
+    if (gdriveConnect) {
+      gdriveConnect.textContent = 'Connect to Google Drive';
+      gdriveConnect.classList.remove('secondary');
+      gdriveConnect.classList.add('primary');
+    }
+    if (gdriveUnlink) {
+      gdriveUnlink.style.display = 'none';
+    }
+  }
+}
+
+// Settings button toggle
+if (gdriveSettingsBtn) {
+  gdriveSettingsBtn.addEventListener('click', () => {
+    const isVisible = gdriveSettings.style.display !== 'none';
+    gdriveSettings.style.display = isVisible ? 'none' : 'block';
+  });
+}
+
+// Connect button handler
+async function handleGDriveConnect() {
+  if (!gdriveConnect) return;
+
+  gdriveConnect.disabled = true;
+  const originalText = gdriveConnect.textContent;
+  gdriveConnect.textContent = 'Connecting...';
+
+  try {
+    const response = await chrome.runtime.sendMessage({ action: 'googleDriveOAuth' });
+
+    if (response.success) {
+      showStatus('Connected to Google Drive!', 'success');
+      await updateGDriveUI();
+    } else {
+      showStatus('Failed to connect: ' + response.error, 'error');
+    }
+  } catch (error) {
+    showStatus('Error: ' + error.message, 'error');
+  } finally {
+    gdriveConnect.disabled = false;
+    gdriveConnect.textContent = originalText;
+  }
+}
+
+if (gdriveConnect) {
+  gdriveConnect.addEventListener('click', handleGDriveConnect);
+}
+
+if (gdriveConnectFirst) {
+  gdriveConnectFirst.addEventListener('click', handleGDriveConnect);
+}
+
+// Unlink button handler
+if (gdriveUnlink) {
+  gdriveUnlink.addEventListener('click', async () => {
+    const confirmed = confirm('Unlink Google Drive account? You will need to reconnect to upload videos.');
+
+    if (!confirmed) return;
+
+    gdriveUnlink.disabled = true;
+
+    await chrome.storage.local.set({
+      googleDriveSessionId: null,
+      googleDriveConnected: false
+    });
+
+    showStatus('Google Drive unlinked', 'success');
+    await updateGDriveUI();
+
+    gdriveUnlink.disabled = false;
+  });
+}
+
+// Upload video button handler
+if (uploadVideoBtn) {
+  uploadVideoBtn.addEventListener('click', async () => {
+    const file = videoFileInput.files[0];
+    if (!file) {
+      showStatus('Please select a video file', 'error');
+      return;
+    }
+
+    uploadVideoBtn.disabled = true;
+    videoProgress.style.display = 'block';
+    videoProgressText.textContent = 'Reading file...';
+    videoProgressFill.style.width = '30%';
+
+    try {
+      // Get session ID
+      const data = await chrome.storage.local.get(['googleDriveSessionId']);
+      if (!data.googleDriveSessionId) {
+        throw new Error('Not connected to Google Drive');
+      }
+
+      // Read file as base64
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        try {
+          videoProgressText.textContent = 'Uploading to Google Drive...';
+          videoProgressFill.style.width = '60%';
+
+          const fileData = e.target.result.split(',')[1]; // Remove data:video/mp4;base64, prefix
+
+          const response = await chrome.runtime.sendMessage({
+            action: 'googleDriveUpload',
+            fileData: fileData,
+            fileName: file.name,
+            sessionId: data.googleDriveSessionId
+          });
+
+          if (response.success) {
+            videoProgressFill.style.width = '100%';
+            videoProgressText.textContent = 'Upload complete!';
+
+            videoOutputText.value = response.url;
+            videoOutputSection.style.display = 'block';
+
+            showStatus('Video uploaded successfully!', 'success');
+
+            setTimeout(() => {
+              videoProgress.style.display = 'none';
+            }, 2000);
+          } else {
+            throw new Error(response.error);
+          }
+        } catch (error) {
+          showStatus('Upload failed: ' + error.message, 'error');
+          videoProgress.style.display = 'none';
+        } finally {
+          uploadVideoBtn.disabled = false;
+        }
+      };
+
+      reader.onerror = () => {
+        showStatus('Failed to read file', 'error');
+        videoProgress.style.display = 'none';
+        uploadVideoBtn.disabled = false;
+      };
+
+      reader.readAsDataURL(file);
+    } catch (error) {
+      showStatus('Error: ' + error.message, 'error');
+      videoProgress.style.display = 'none';
+      uploadVideoBtn.disabled = false;
+    }
+  });
+}
+
+// Copy video link button
+if (videoCopyBtn) {
+  videoCopyBtn.addEventListener('click', () => {
+    videoOutputText.select();
+    document.execCommand('copy');
+    showStatus('Link copied to clipboard!', 'success');
+  });
+}
+
+// Update Google Drive UI when switching to Upload Vid tab
+const originalSwitchTab = switchTab;
+switchTab = function(tabName) {
+  originalSwitchTab(tabName);
+
+  if (tabName === 'upload-vid') {
+    updateGDriveUI();
+  }
+};
