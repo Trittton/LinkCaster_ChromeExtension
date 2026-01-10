@@ -1959,10 +1959,8 @@ async function updateImageFiles() {
     detectedImageFiles.set(fileInfo.name, fileInfo);
   });
 
-  // Show/hide detected files section
-  if (imageDetectedFiles) {
-    imageDetectedFiles.style.display = files.length > 0 ? 'block' : 'none';
-  }
+  // Keep detected files section visible (don't hide when empty)
+  // It will be shown when folder is selected
 
   // Render files
   if (imageFileList) {
@@ -1983,10 +1981,8 @@ async function updateVideoFiles() {
     detectedVideoFiles.set(fileInfo.name, fileInfo);
   });
 
-  // Show/hide detected files section
-  if (videoDetectedFiles) {
-    videoDetectedFiles.style.display = files.length > 0 ? 'block' : 'none';
-  }
+  // Keep detected files section visible (don't hide when empty)
+  // It will be shown when folder is selected
 
   // Render files
   if (videoFileList) {
@@ -2008,6 +2004,11 @@ if (imageSelectFolder) {
       if (imageFolderPath) {
         imageFolderPath.textContent = `Monitoring: ${handle.name}`;
         imageFolderPath.style.color = '#38ef7d';
+      }
+
+      // Show detected files section
+      if (imageDetectedFiles) {
+        imageDetectedFiles.style.display = 'block';
       }
 
       // Load initial files
@@ -2035,6 +2036,11 @@ if (videoSelectFolder) {
       if (videoFolderPath) {
         videoFolderPath.textContent = `Monitoring: ${handle.name}`;
         videoFolderPath.style.color = '#38ef7d';
+      }
+
+      // Show detected files section
+      if (videoDetectedFiles) {
+        videoDetectedFiles.style.display = 'block';
       }
 
       // Load initial files
