@@ -1,19 +1,35 @@
-# Image Link Converter
+# LinkCaster
 
-A browser extension that converts image links from Lightshot and other image hosting services to your preferred host (vgy.me or Imgur).
+A powerful Chrome extension for uploading images and videos to cloud services and converting links between different hosting platforms.
 
 ## Features
 
+### 🔄 Convert Tab
 - **Batch Processing**: Convert multiple image links at once
-- **Multiple Input Formats**: Paste links separated by newlines or spaces
-- **Automatic Detection**: Detects image URLs from various services
-- **Lightshot Support**: Automatically handles prnt.sc and prntscr.com links
-- **Multiple Upload Services**:
-  - vgy.me (no API key required)
-  - Imgur (requires API key)
+- **Multiple Upload Services**: Catbox, FreeImage, vgy.me, Flickr, Gyazo, Google Drive
+- **Automatic Detection**: Detects image URLs from various services including Lightshot
 - **Progress Tracking**: Real-time progress indicator
-- **One-Click Copy**: Copy converted links to clipboard
 - **Background Processing**: Downloads and uploads happen in the background
+
+### 📷 Upload Img Tab
+- **Batch Image Upload**: Upload multiple images simultaneously
+- **Folder Monitoring**: Auto-detect new files from selected folder
+- **Multiple Services**: Catbox, Imgur, Google Drive
+- **Upload History**: Track all uploaded images with links
+- **Time-based Filtering**: Only show files from last X minutes
+
+### 🎥 Upload Vid Tab
+- **Google Drive Integration**: Direct video upload to Google Drive
+- **Folder Monitoring**: Auto-detect new video files
+- **Upload History**: Track all uploaded videos
+- **Shareable Links**: Automatically generate public links
+
+### 🎨 Additional Features
+- **Dark Theme**: Beautiful dark mode interface
+- **File Monitoring**: Automatically detect new downloads in selected folders
+- **Progress Indicators**: Real-time upload progress
+- **One-Click Copy**: Copy links to clipboard
+- **Settings Persistence**: All settings saved across browser sessions
 
 ## Installation
 
@@ -130,14 +146,36 @@ https://vgy.me/converted5.png
 ### Project Structure
 
 ```
-ImgURLConverter/
-├── manifest.json       # Extension configuration
-├── popup.html         # Main UI
-├── popup.css          # Styling
-├── popup.js           # Main logic
-├── background.js      # Background service worker
-├── icons/             # Extension icons
-└── README.md          # This file
+LinkCaster/
+├── manifest.json          # Extension configuration
+├── popup.html            # Main UI
+├── popup.css             # Styling
+├── popup.js              # Main logic
+├── background.js         # Background service worker
+├── extension_icon.png    # Extension icon
+├── icons/                # Extension icons (16, 48, 128)
+├── backend/              # Google Drive OAuth server
+│   ├── server.js
+│   └── package.json
+├── docs/
+│   ├── user/            # User documentation
+│   │   ├── FLICKR_SETUP.md
+│   │   ├── GOOGLE_OAUTH_SETUP.md
+│   │   ├── GYAZO_SETUP.md
+│   │   └── TROUBLESHOOTING.md
+│   └── development/     # Development documentation
+│       ├── ADDED_FEATURES.md
+│       ├── FEATURES_TRACKER.md
+│       └── REMAINING_FEATURES.md
+├── scripts/
+│   ├── build/           # Build scripts
+│   │   ├── create-crx.bat
+│   │   └── auto-install.bat
+│   └── dev/             # Development tools
+│       ├── create-icons.html
+│       └── generate-icons.bat
+├── build/               # Build output (gitignored)
+└── README.md
 ```
 
 ### Making Changes
