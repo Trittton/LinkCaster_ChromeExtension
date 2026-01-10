@@ -2122,18 +2122,54 @@ if (videoTimeFilter) {
         await updateImageFiles();
         imageMonitorInterval = setInterval(updateImageFiles, 10000);
       } else {
-        // Permission expired, need to reselect
-        if (imageFolderPath) {
-          const folderName = savedImageFolderName || 'folder';
-          imageFolderPath.innerHTML = `<span style="color: #ff6b6b;">⚠️ Permission expired for "${folderName}"</span><br><span style="font-size: 10px;">Click "Select Folder to Monitor" above to restore</span>`;
-        }
+        // Permission expired, auto-restore folder selection
+        const folderName = savedImageFolderName || 'folder';
 
-        // Auto-open settings panel on Upload Img tab if it's the current tab
+        // Auto-open settings panel
         const currentTab = document.querySelector('.tab-btn.active');
         if (currentTab && currentTab.dataset.tab === 'upload-img') {
           const settingsPanel = document.getElementById('image-settings-panel');
           if (settingsPanel) {
             settingsPanel.style.display = 'block';
+          }
+
+          // Show restoring message
+          if (imageFolderPath) {
+            imageFolderPath.innerHTML = `<span style="color: #ffa500;">🔄 Restoring "${folderName}"...</span>`;
+          }
+
+          // Auto-trigger folder picker after a short delay
+          setTimeout(async () => {
+            try {
+              const handle = await window.showDirectoryPicker({ mode: 'read' });
+              imageFolderHandle = handle;
+              await saveFolderHandle('imageFolderHandle', handle);
+              await chrome.storage.local.set({ imageFolderName: handle.name });
+
+              if (imageFolderPath) {
+                imageFolderPath.textContent = `Monitoring: ${handle.name}`;
+                imageFolderPath.style.color = '#38ef7d';
+              }
+
+              await updateImageFiles();
+              if (imageMonitorInterval) clearInterval(imageMonitorInterval);
+              imageMonitorInterval = setInterval(updateImageFiles, 10000);
+
+              showStatus(`Folder restored: ${handle.name}`, 'success');
+            } catch (error) {
+              if (error.name !== 'AbortError') {
+                console.error('Failed to restore folder:', error);
+              }
+              // User cancelled or error - show helpful message
+              if (imageFolderPath) {
+                imageFolderPath.innerHTML = `<span style="color: #ff6b6b;">Folder not restored</span><br><span style="font-size: 10px;">Click "Select Folder to Monitor" to try again</span>`;
+              }
+            }
+          }, 500);
+        } else {
+          // Not on the correct tab, just show message
+          if (imageFolderPath) {
+            imageFolderPath.innerHTML = `<span style="color: #ff6b6b;">Permission needed for "${folderName}"</span><br><span style="font-size: 10px;">Will restore when you switch to Upload Img tab</span>`;
           }
         }
       }
@@ -2150,18 +2186,54 @@ if (videoTimeFilter) {
         await updateVideoFiles();
         videoMonitorInterval = setInterval(updateVideoFiles, 10000);
       } else {
-        // Permission expired, need to reselect
-        if (videoFolderPath) {
-          const folderName = savedVideoFolderName || 'folder';
-          videoFolderPath.innerHTML = `<span style="color: #ff6b6b;">⚠️ Permission expired for "${folderName}"</span><br><span style="font-size: 10px;">Click "Select Folder to Monitor" above to restore</span>`;
-        }
+        // Permission expired, auto-restore folder selection
+        const folderName = savedVideoFolderName || 'folder';
 
-        // Auto-open settings panel on Upload Vid tab if it's the current tab
+        // Auto-open settings panel
         const currentTab = document.querySelector('.tab-btn.active');
         if (currentTab && currentTab.dataset.tab === 'upload-vid') {
           const settingsPanel = document.getElementById('gdrive-settings');
           if (settingsPanel) {
             settingsPanel.style.display = 'block';
+          }
+
+          // Show restoring message
+          if (videoFolderPath) {
+            videoFolderPath.innerHTML = `<span style="color: #ffa500;">🔄 Restoring "${folderName}"...</span>`;
+          }
+
+          // Auto-trigger folder picker after a short delay
+          setTimeout(async () => {
+            try {
+              const handle = await window.showDirectoryPicker({ mode: 'read' });
+              videoFolderHandle = handle;
+              await saveFolderHandle('videoFolderHandle', handle);
+              await chrome.storage.local.set({ videoFolderName: handle.name });
+
+              if (videoFolderPath) {
+                videoFolderPath.textContent = `Monitoring: ${handle.name}`;
+                videoFolderPath.style.color = '#38ef7d';
+              }
+
+              await updateVideoFiles();
+              if (videoMonitorInterval) clearInterval(videoMonitorInterval);
+              videoMonitorInterval = setInterval(updateVideoFiles, 10000);
+
+              showStatus(`Folder restored: ${handle.name}`, 'success');
+            } catch (error) {
+              if (error.name !== 'AbortError') {
+                console.error('Failed to restore folder:', error);
+              }
+              // User cancelled or error - show helpful message
+              if (videoFolderPath) {
+                videoFolderPath.innerHTML = `<span style="color: #ff6b6b;">Folder not restored</span><br><span style="font-size: 10px;">Click "Select Folder to Monitor" to try again</span>`;
+              }
+            }
+          }, 500);
+        } else {
+          // Not on the correct tab, just show message
+          if (videoFolderPath) {
+            videoFolderPath.innerHTML = `<span style="color: #ff6b6b;">Permission needed for "${folderName}"</span><br><span style="font-size: 10px;">Will restore when you switch to Upload Vid tab</span>`;
           }
         }
       }
