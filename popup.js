@@ -1911,11 +1911,22 @@ function renderDetectedFiles(files, listElement, fileType) {
     return;
   }
 
+  // Save current checkbox states before re-rendering
+  const checkedFiles = new Set();
+  const existingCheckboxes = listElement.querySelectorAll('.file-checkbox:checked');
+  existingCheckboxes.forEach(checkbox => {
+    checkedFiles.add(checkbox.dataset.filename);
+  });
+
   const html = files.map(fileInfo => {
     const uploadedClass = fileInfo.uploaded ? 'uploaded' : '';
     const uploadedBadge = fileInfo.uploaded ? '<span style="color: #38ef7d; font-size: 10px; margin-left: 8px;">✓ Uploaded</span>' : '';
     const sizeKB = (fileInfo.size / 1024).toFixed(1);
     const date = new Date(fileInfo.lastModified).toLocaleTimeString();
+
+    // Check if this file was previously checked
+    const wasChecked = checkedFiles.has(fileInfo.name);
+    const checkedAttr = wasChecked && !fileInfo.uploaded ? 'checked' : '';
 
     return `
       <div class="file-item ${uploadedClass}" style="padding: 8px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">
@@ -1927,7 +1938,7 @@ function renderDetectedFiles(files, listElement, fileType) {
             ${sizeKB} KB • ${date}
           </div>
         </div>
-        <input type="checkbox" class="file-checkbox" data-filename="${fileInfo.name}" ${fileInfo.uploaded ? 'disabled' : ''} style="margin-left: 8px;">
+        <input type="checkbox" class="file-checkbox" data-filename="${fileInfo.name}" ${fileInfo.uploaded ? 'disabled' : ''} ${checkedAttr} style="margin-left: 8px;">
       </div>
     `;
   }).join('');
@@ -1991,6 +2002,9 @@ if (imageSelectFolder) {
       imageFolderHandle = handle;
       await saveFolderHandle('imageFolderHandle', handle);
 
+      // Save folder name to chrome.storage for persistence info
+      await chrome.storage.local.set({ imageFolderName: handle.name });
+
       if (imageFolderPath) {
         imageFolderPath.textContent = `Monitoring: ${handle.name}`;
         imageFolderPath.style.color = '#38ef7d';
@@ -2016,6 +2030,9 @@ if (videoSelectFolder) {
       const handle = await window.showDirectoryPicker();
       videoFolderHandle = handle;
       await saveFolderHandle('videoFolderHandle', handle);
+
+      // Save folder name to chrome.storage for persistence info
+      await chrome.storage.local.set({ videoFolderName: handle.name });
 
       if (videoFolderPath) {
         videoFolderPath.textContent = `Monitoring: ${handle.name}`;
@@ -2069,9 +2086,18 @@ if (videoTimeFilter) {
 // Load saved folder handles and settings on page load
 (async function initializeFileMonitoring() {
   try {
-    // Load saved time filters
-    const { imageTimeFilter: savedImageFilter, videoTimeFilter: savedVideoFilter } =
-      await chrome.storage.local.get(['imageTimeFilter', 'videoTimeFilter']);
+    // Load saved time filters and folder names
+    const {
+      imageTimeFilter: savedImageFilter,
+      videoTimeFilter: savedVideoFilter,
+      imageFolderName: savedImageFolderName,
+      videoFolderName: savedVideoFolderName
+    } = await chrome.storage.local.get([
+      'imageTimeFilter',
+      'videoTimeFilter',
+      'imageFolderName',
+      'videoFolderName'
+    ]);
 
     if (savedImageFilter && imageTimeFilter) {
       imageTimeFilter.value = savedImageFilter;
@@ -2098,7 +2124,8 @@ if (videoTimeFilter) {
       } else {
         // Permission expired, need to reselect
         if (imageFolderPath) {
-          imageFolderPath.textContent = `Permission needed - please reselect folder`;
+          const folderName = savedImageFolderName || 'folder';
+          imageFolderPath.textContent = `"${folderName}" - permission needed, click to reselect`;
           imageFolderPath.style.color = '#ff6b6b';
         }
       }
@@ -2117,7 +2144,8 @@ if (videoTimeFilter) {
       } else {
         // Permission expired, need to reselect
         if (videoFolderPath) {
-          videoFolderPath.textContent = `Permission needed - please reselect folder`;
+          const folderName = savedVideoFolderName || 'folder';
+          videoFolderPath.textContent = `"${folderName}" - permission needed, click to reselect`;
           videoFolderPath.style.color = '#ff6b6b';
         }
       }
