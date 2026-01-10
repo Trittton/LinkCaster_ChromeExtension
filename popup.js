@@ -33,6 +33,22 @@ const convertGdriveConnect = document.getElementById('convert-gdrive-connect');
 const convertGdriveUnlink = document.getElementById('convert-gdrive-unlink');
 const convertGdriveStatus = document.getElementById('convert-gdrive-status');
 
+// File Monitoring Elements - Images
+const imageSelectFolder = document.getElementById('image-select-folder');
+const imageFolderPath = document.getElementById('image-folder-path');
+const imageTimeFilter = document.getElementById('image-time-filter');
+const imageDetectedFiles = document.getElementById('image-detected-files');
+const imageFileList = document.getElementById('image-file-list');
+const imageRefreshFiles = document.getElementById('image-refresh-files');
+
+// File Monitoring Elements - Videos
+const videoSelectFolder = document.getElementById('video-select-folder');
+const videoFolderPath = document.getElementById('video-folder-path');
+const videoTimeFilter = document.getElementById('video-time-filter');
+const videoDetectedFiles = document.getElementById('video-detected-files');
+const videoFileList = document.getElementById('video-file-list');
+const videoRefreshFiles = document.getElementById('video-refresh-files');
+
 // API Links and OAuth configuration
 const API_LINKS = {
   vgy: 'https://vgy.me/account/details',
@@ -62,6 +78,15 @@ const SERVICE_INFO = {
 let apiSettingsExpanded = false;
 let lastApiError = null;
 let currentTab = 'convert';
+
+// File Monitoring State
+let imageFolderHandle = null;
+let videoFolderHandle = null;
+let imageMonitorInterval = null;
+let videoMonitorInterval = null;
+let detectedImageFiles = new Map(); // filename -> {file, lastModified, uploaded}
+let detectedVideoFiles = new Map(); // filename -> {file, lastModified, uploaded}
+let uploadedFiles = new Set(); // Track uploaded filenames
 
 // Tab switching function
 function switchTab(tabName) {
@@ -1067,7 +1092,26 @@ if (gdriveUnlink) {
 // Upload video button handler
 if (uploadVideoBtn) {
   uploadVideoBtn.addEventListener('click', async () => {
-    const file = videoFileInput.files[0];
+    // Get file from either file input or detected files
+    let file = null;
+
+    // Check file input first
+    if (videoFileInput.files && videoFileInput.files.length > 0) {
+      file = videoFileInput.files[0];
+    } else {
+      // Check for checked file in detected files
+      if (videoFileList) {
+        const checkbox = videoFileList.querySelector('.file-checkbox:checked:not(:disabled)');
+        if (checkbox) {
+          const filename = checkbox.dataset.filename;
+          const fileInfo = detectedVideoFiles.get(filename);
+          if (fileInfo && fileInfo.file) {
+            file = fileInfo.file;
+          }
+        }
+      }
+    }
+
     if (!file) {
       showStatus('Please select a video file', 'error');
       return;
@@ -1110,6 +1154,19 @@ if (uploadVideoBtn) {
 
             // Add to history
             await addToHistory(file.name, response.url, response.fileId);
+
+            // Mark file as uploaded
+            uploadedFiles.add(file.name);
+
+            // Refresh detected files list to show "Uploaded" badge
+            if (videoFolderHandle) {
+              await updateVideoFiles();
+            }
+
+            // Clear file input
+            if (videoFileInput) {
+              videoFileInput.value = '';
+            }
 
             showStatus('Video uploaded successfully!', 'success');
 
@@ -1522,8 +1579,27 @@ async function uploadToCatbox(file) {
 // Upload images button handler
 if (uploadImagesBtn) {
   uploadImagesBtn.addEventListener('click', async () => {
-    const files = imageFileInput.files;
-    if (!files || files.length === 0) {
+    // Collect files from both file input and detected files
+    const filesToUpload = [];
+
+    // Add files from file input
+    if (imageFileInput.files && imageFileInput.files.length > 0) {
+      filesToUpload.push(...Array.from(imageFileInput.files));
+    }
+
+    // Add checked files from detected files
+    if (imageFileList) {
+      const checkboxes = imageFileList.querySelectorAll('.file-checkbox:checked:not(:disabled)');
+      checkboxes.forEach(checkbox => {
+        const filename = checkbox.dataset.filename;
+        const fileInfo = detectedImageFiles.get(filename);
+        if (fileInfo && fileInfo.file) {
+          filesToUpload.push(fileInfo.file);
+        }
+      });
+    }
+
+    if (filesToUpload.length === 0) {
       showStatus('Please select at least one image', 'error');
       return;
     }
@@ -1546,14 +1622,15 @@ if (uploadImagesBtn) {
 
     uploadImagesBtn.disabled = true;
     imageProgress.style.display = 'block';
-    imageProgressText.textContent = `Uploading 0/${files.length} images...`;
+    imageProgressText.textContent = `Uploading 0/${filesToUpload.length} images...`;
     imageProgressFill.style.width = '0%';
 
     const urls = [];
     let completed = 0;
+    const uploadedFilenames = []; // Track successfully uploaded files
 
     try {
-      for (const file of files) {
+      for (const file of filesToUpload) {
         try {
           let url;
           if (service === 'gdrive') {
@@ -1600,10 +1677,13 @@ if (uploadImagesBtn) {
           // Add to history
           await addToImageHistory(file.name, url);
 
+          // Track uploaded file
+          uploadedFilenames.push(file.name);
+
           completed++;
-          const percentage = (completed / files.length) * 100;
+          const percentage = (completed / filesToUpload.length) * 100;
           imageProgressFill.style.width = percentage + '%';
-          imageProgressText.textContent = `Uploaded ${completed}/${files.length} images`;
+          imageProgressText.textContent = `Uploaded ${completed}/${filesToUpload.length} images`;
         } catch (error) {
           console.error(`Failed to upload ${file.name}:`, error);
           urls.push(`Error: ${file.name} upload failed`);
@@ -1614,7 +1694,22 @@ if (uploadImagesBtn) {
       imageOutputText.value = urls.join('\n');
       imageOutputSection.style.display = 'block';
 
-      showStatus(`Successfully uploaded ${urls.filter(u => !u.startsWith('Error')).length}/${files.length} images!`, 'success');
+      // Mark files as uploaded
+      uploadedFilenames.forEach(filename => {
+        uploadedFiles.add(filename);
+      });
+
+      // Refresh detected files list to show "Uploaded" badges
+      if (uploadedFilenames.length > 0 && imageFolderHandle) {
+        await updateImageFiles();
+      }
+
+      // Clear file input
+      if (imageFileInput) {
+        imageFileInput.value = '';
+      }
+
+      showStatus(`Successfully uploaded ${urls.filter(u => !u.startsWith('Error')).length}/${filesToUpload.length} images!`, 'success');
 
       setTimeout(() => {
         imageProgress.style.display = 'none';
@@ -1719,6 +1814,298 @@ if (clearImageHistory) {
     showStatus('History cleared', 'success');
   });
 }
+
+// === File Monitoring Functions ===
+
+// IndexedDB functions for folder handles
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open('FolderMonitorDB', 1);
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => resolve(request.result);
+    request.onupgradeneeded = (event) => {
+      const db = event.target.result;
+      if (!db.objectStoreNames.contains('folders')) {
+        db.createObjectStore('folders');
+      }
+    };
+  });
+}
+
+async function saveFolderHandle(key, handle) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(['folders'], 'readwrite');
+    const store = transaction.objectStore('folders');
+    const request = store.put(handle, key);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function getFolderHandle(key) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(['folders'], 'readonly');
+    const store = transaction.objectStore('folders');
+    const request = store.get(key);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+// Scan folder for files
+async function scanFolder(folderHandle, fileType, timeFilterMinutes) {
+  if (!folderHandle) return [];
+
+  try {
+    // Request permission if needed
+    const permission = await folderHandle.queryPermission({ mode: 'read' });
+    if (permission !== 'granted') {
+      const newPermission = await folderHandle.requestPermission({ mode: 'read' });
+      if (newPermission !== 'granted') {
+        throw new Error('Permission denied');
+      }
+    }
+
+    const files = [];
+    const now = Date.now();
+    const timeLimit = timeFilterMinutes * 60 * 1000; // Convert to milliseconds
+
+    for await (const entry of folderHandle.values()) {
+      if (entry.kind === 'file') {
+        const file = await entry.getFile();
+
+        // Check file type
+        const isCorrectType = fileType === 'image'
+          ? file.type.startsWith('image/')
+          : file.type.startsWith('video/');
+
+        if (!isCorrectType) continue;
+
+        // Check file age
+        const fileAge = now - file.lastModified;
+        if (fileAge > timeLimit) continue;
+
+        files.push({
+          name: file.name,
+          file: file,
+          lastModified: file.lastModified,
+          size: file.size,
+          uploaded: uploadedFiles.has(file.name)
+        });
+      }
+    }
+
+    return files.sort((a, b) => b.lastModified - a.lastModified);
+  } catch (error) {
+    console.error('Error scanning folder:', error);
+    return [];
+  }
+}
+
+// Render detected files
+function renderDetectedFiles(files, listElement, fileType) {
+  if (files.length === 0) {
+    listElement.innerHTML = '<p style="text-align: center; color: var(--text-dimmed); font-size: 12px; padding: 20px;">No files detected</p>';
+    return;
+  }
+
+  const html = files.map(fileInfo => {
+    const uploadedClass = fileInfo.uploaded ? 'uploaded' : '';
+    const uploadedBadge = fileInfo.uploaded ? '<span style="color: #38ef7d; font-size: 10px; margin-left: 8px;">✓ Uploaded</span>' : '';
+    const sizeKB = (fileInfo.size / 1024).toFixed(1);
+    const date = new Date(fileInfo.lastModified).toLocaleTimeString();
+
+    return `
+      <div class="file-item ${uploadedClass}" style="padding: 8px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">
+        <div style="flex: 1; min-width: 0;">
+          <div style="font-size: 12px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+            ${fileInfo.name}${uploadedBadge}
+          </div>
+          <div style="font-size: 10px; color: var(--text-dimmed); margin-top: 2px;">
+            ${sizeKB} KB • ${date}
+          </div>
+        </div>
+        <input type="checkbox" class="file-checkbox" data-filename="${fileInfo.name}" ${fileInfo.uploaded ? 'disabled' : ''} style="margin-left: 8px;">
+      </div>
+    `;
+  }).join('');
+
+  listElement.innerHTML = html;
+}
+
+// Update image files
+async function updateImageFiles() {
+  if (!imageFolderHandle) return;
+
+  const timeFilter = parseInt(imageTimeFilter?.value || 20);
+  const files = await scanFolder(imageFolderHandle, 'image', timeFilter);
+
+  // Update detected files map
+  detectedImageFiles.clear();
+  files.forEach(fileInfo => {
+    detectedImageFiles.set(fileInfo.name, fileInfo);
+  });
+
+  // Show/hide detected files section
+  if (imageDetectedFiles) {
+    imageDetectedFiles.style.display = files.length > 0 ? 'block' : 'none';
+  }
+
+  // Render files
+  if (imageFileList) {
+    renderDetectedFiles(files, imageFileList, 'image');
+  }
+}
+
+// Update video files
+async function updateVideoFiles() {
+  if (!videoFolderHandle) return;
+
+  const timeFilter = parseInt(videoTimeFilter?.value || 20);
+  const files = await scanFolder(videoFolderHandle, 'video', timeFilter);
+
+  // Update detected files map
+  detectedVideoFiles.clear();
+  files.forEach(fileInfo => {
+    detectedVideoFiles.set(fileInfo.name, fileInfo);
+  });
+
+  // Show/hide detected files section
+  if (videoDetectedFiles) {
+    videoDetectedFiles.style.display = files.length > 0 ? 'block' : 'none';
+  }
+
+  // Render files
+  if (videoFileList) {
+    renderDetectedFiles(files, videoFileList, 'video');
+  }
+}
+
+// Event listeners for folder selection
+if (imageSelectFolder) {
+  imageSelectFolder.addEventListener('click', async () => {
+    try {
+      const handle = await window.showDirectoryPicker();
+      imageFolderHandle = handle;
+      await saveFolderHandle('imageFolderHandle', handle);
+
+      if (imageFolderPath) {
+        imageFolderPath.textContent = `Monitoring: ${handle.name}`;
+        imageFolderPath.style.color = '#38ef7d';
+      }
+
+      // Start monitoring
+      await updateImageFiles();
+      if (imageMonitorInterval) clearInterval(imageMonitorInterval);
+      imageMonitorInterval = setInterval(updateImageFiles, 10000); // Every 10 seconds
+
+      showStatus(`Now monitoring folder: ${handle.name}`, 'success');
+    } catch (error) {
+      if (error.name !== 'AbortError') {
+        showStatus('Failed to select folder: ' + error.message, 'error');
+      }
+    }
+  });
+}
+
+if (videoSelectFolder) {
+  videoSelectFolder.addEventListener('click', async () => {
+    try {
+      const handle = await window.showDirectoryPicker();
+      videoFolderHandle = handle;
+      await saveFolderHandle('videoFolderHandle', handle);
+
+      if (videoFolderPath) {
+        videoFolderPath.textContent = `Monitoring: ${handle.name}`;
+        videoFolderPath.style.color = '#38ef7d';
+      }
+
+      // Start monitoring
+      await updateVideoFiles();
+      if (videoMonitorInterval) clearInterval(videoMonitorInterval);
+      videoMonitorInterval = setInterval(updateVideoFiles, 10000); // Every 10 seconds
+
+      showStatus(`Now monitoring folder: ${handle.name}`, 'success');
+    } catch (error) {
+      if (error.name !== 'AbortError') {
+        showStatus('Failed to select folder: ' + error.message, 'error');
+      }
+    }
+  });
+}
+
+// Refresh buttons
+if (imageRefreshFiles) {
+  imageRefreshFiles.addEventListener('click', async () => {
+    await updateImageFiles();
+    showStatus('Files refreshed', 'success');
+  });
+}
+
+if (videoRefreshFiles) {
+  videoRefreshFiles.addEventListener('click', async () => {
+    await updateVideoFiles();
+    showStatus('Files refreshed', 'success');
+  });
+}
+
+// Time filter change handlers
+if (imageTimeFilter) {
+  imageTimeFilter.addEventListener('change', async () => {
+    await chrome.storage.local.set({ imageTimeFilter: imageTimeFilter.value });
+    await updateImageFiles();
+  });
+}
+
+if (videoTimeFilter) {
+  videoTimeFilter.addEventListener('change', async () => {
+    await chrome.storage.local.set({ videoTimeFilter: videoTimeFilter.value });
+    await updateVideoFiles();
+  });
+}
+
+// Load saved folder handles and settings on page load
+(async function initializeFileMonitoring() {
+  try {
+    // Load saved time filters
+    const { imageTimeFilter: savedImageFilter, videoTimeFilter: savedVideoFilter } =
+      await chrome.storage.local.get(['imageTimeFilter', 'videoTimeFilter']);
+
+    if (savedImageFilter && imageTimeFilter) {
+      imageTimeFilter.value = savedImageFilter;
+    }
+    if (savedVideoFilter && videoTimeFilter) {
+      videoTimeFilter.value = savedVideoFilter;
+    }
+
+    // Load saved folder handles
+    imageFolderHandle = await getFolderHandle('imageFolderHandle');
+    videoFolderHandle = await getFolderHandle('videoFolderHandle');
+
+    // Update folder paths and start monitoring
+    if (imageFolderHandle) {
+      if (imageFolderPath) {
+        imageFolderPath.textContent = `Monitoring: ${imageFolderHandle.name}`;
+        imageFolderPath.style.color = '#38ef7d';
+      }
+      await updateImageFiles();
+      imageMonitorInterval = setInterval(updateImageFiles, 10000);
+    }
+
+    if (videoFolderHandle) {
+      if (videoFolderPath) {
+        videoFolderPath.textContent = `Monitoring: ${videoFolderHandle.name}`;
+        videoFolderPath.style.color = '#38ef7d';
+      }
+      await updateVideoFiles();
+      videoMonitorInterval = setInterval(updateVideoFiles, 10000);
+    }
+  } catch (error) {
+    console.error('Error initializing file monitoring:', error);
+  }
+})();
 
 // Initialize Google Drive status on page load
 (async function initializeGoogleDriveStatus() {

@@ -127,6 +127,19 @@
             </div>
             <small id="image-gdrive-status" style="display: block; color: var(--text-dimmed); font-size: 11px; text-align: center; margin-top: 6px;"></small>
           </div>
+
+          <!-- Folder Monitoring -->
+          <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-color);">
+            <label>Auto-Detect New Files</label>
+            <button id="image-select-folder" class="secondary" style="width: 100%; margin-top: 8px;">Select Folder to Monitor</button>
+            <small id="image-folder-path" style="display: block; color: var(--text-dimmed); font-size: 11px; margin-top: 6px;">No folder selected</small>
+
+            <div style="margin-top: 12px;">
+              <label>Only show files from last:</label>
+              <input type="number" id="image-time-filter" min="1" max="1440" value="20" style="width: 60px; margin: 8px 4px 0 0;">
+              <span style="font-size: 12px;">minutes</span>
+            </div>
+          </div>
         </div>
 
         <!-- History Panel -->
@@ -140,11 +153,22 @@
           </div>
         </div>
 
+        <!-- Detected Files List -->
+        <div id="image-detected-files" style="display: none; margin-bottom: 12px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <label style="margin: 0;">Detected Files</label>
+            <button id="image-refresh-files" class="secondary" style="font-size: 11px; padding: 4px 8px;">Refresh</button>
+          </div>
+          <div id="image-file-list" style="max-height: 200px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 4px; padding: 8px;">
+            <p style="text-align: center; color: var(--text-dimmed); font-size: 12px; padding: 20px;">No files detected</p>
+          </div>
+        </div>
+
         <!-- Upload Area -->
         <div class="input-section">
-          <label>Select Images</label>
+          <label>Select Images (or use detected files above)</label>
           <input type="file" id="image-file-input" accept="image/*" multiple style="margin-bottom: 8px;">
-          <button id="upload-images-btn" class="primary" style="width: 100%;">Upload Images</button>
+          <button id="upload-images-btn" class="primary" style="width: 100%;">Upload Selected Files</button>
         </div>
 
         <div class="progress" id="image-progress" style="display: none;">
@@ -202,6 +226,19 @@
             <button id="gdrive-unlink" class="secondary" style="display: none;">Unlink</button>
           </div>
           <small id="gdrive-status" style="display: block; color: var(--text-dimmed); font-size: 11px; text-align: center; margin-top: 6px;"></small>
+
+          <!-- Folder Monitoring -->
+          <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-color);">
+            <label>Auto-Detect New Files</label>
+            <button id="video-select-folder" class="secondary" style="width: 100%; margin-top: 8px;">Select Folder to Monitor</button>
+            <small id="video-folder-path" style="display: block; color: var(--text-dimmed); font-size: 11px; margin-top: 6px;">No folder selected</small>
+
+            <div style="margin-top: 12px;">
+              <label>Only show files from last:</label>
+              <input type="number" id="video-time-filter" min="1" max="1440" value="20" style="width: 60px; margin: 8px 4px 0 0;">
+              <span style="font-size: 12px;">minutes</span>
+            </div>
+          </div>
         </div>
 
         <!-- History Panel -->
@@ -217,8 +254,19 @@
 
         <!-- Upload section (visible when connected) -->
         <div id="gdrive-upload-section" style="display: none;">
+          <!-- Detected Files List -->
+          <div id="video-detected-files" style="display: none; margin-bottom: 12px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <label style="margin: 0;">Detected Files</label>
+              <button id="video-refresh-files" class="secondary" style="font-size: 11px; padding: 4px 8px;">Refresh</button>
+            </div>
+            <div id="video-file-list" style="max-height: 200px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 4px; padding: 8px;">
+              <p style="text-align: center; color: var(--text-dimmed); font-size: 12px; padding: 20px;">No files detected</p>
+            </div>
+          </div>
+
           <div class="input-section">
-            <label>Select Video File</label>
+            <label>Select Video File (or use detected files above)</label>
             <input type="file" id="video-file-input" accept="video/*" style="margin-bottom: 8px;">
             <button id="upload-video-btn" class="primary" style="width: 100%;">Upload to Google Drive</button>
           </div>
