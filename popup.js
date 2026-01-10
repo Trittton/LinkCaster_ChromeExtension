@@ -28,6 +28,10 @@ const progressFill = document.getElementById('progress-fill');
 const progressText = document.getElementById('progress-text');
 const outputSection = document.getElementById('output-section');
 const statusDiv = document.getElementById('status');
+const convertGdriveConnection = document.getElementById('convert-gdrive-connection');
+const convertGdriveConnect = document.getElementById('convert-gdrive-connect');
+const convertGdriveUnlink = document.getElementById('convert-gdrive-unlink');
+const convertGdriveStatus = document.getElementById('convert-gdrive-status');
 
 // API Links and OAuth configuration
 const API_LINKS = {
@@ -185,7 +189,7 @@ function updateThemeIcon(theme) {
 
 function updateApiUI() {
   const host = hostSelect.value;
-  const needsSetup = host === 'vgy' || host === 'flickr' || host === 'gyazo';
+  const needsSetup = host === 'vgy' || host === 'flickr' || host === 'gyazo' || host === 'gdrive';
 
   // Show/hide settings button (gear icon)
   settingsToggle.style.display = needsSetup ? 'inline-flex' : 'none';
@@ -198,27 +202,33 @@ function updateApiUI() {
     serviceInfo.style.display = 'none';
   }
 
+  // Hide all settings panels first
+  apiSettings.style.display = 'none';
+  oauthContainer.style.display = 'none';
+  if (convertGdriveConnection) convertGdriveConnection.style.display = 'none';
+
   // Hide both settings panels if not needed
   if (!needsSetup) {
-    apiSettings.style.display = 'none';
-    oauthContainer.style.display = 'none';
     apiSettingsExpanded = false;
     return;
   }
 
+  // For Google Drive, show connection UI
+  if (host === 'gdrive') {
+    if (convertGdriveConnection) {
+      convertGdriveConnection.style.display = 'block';
+      updateConvertGDriveStatus();
+    }
+  }
   // For Flickr, show OAuth container when settings are expanded
-  if (host === 'flickr') {
-    apiSettings.style.display = 'none';
+  else if (host === 'flickr') {
     if (apiSettingsExpanded) {
       oauthContainer.style.display = 'block';
       updateOAuthStatus();
-    } else {
-      oauthContainer.style.display = 'none';
     }
   }
   // For vgy.me and Gyazo, show API settings when expanded
   else if (host === 'vgy' || host === 'gyazo') {
-    oauthContainer.style.display = 'none';
     if (apiSettingsExpanded) {
       apiSettings.style.display = 'block';
 
@@ -239,8 +249,6 @@ function updateApiUI() {
           apiKey.value = result.gyazoAccessToken || '';
         });
       }
-    } else {
-      apiSettings.style.display = 'none';
     }
   }
 }
@@ -382,7 +390,13 @@ async function handleReplace() {
 
   // Check if service requires API key or OAuth
   const host = hostSelect.value;
-  if (host === 'flickr') {
+  if (host === 'gdrive') {
+    const result = await chrome.storage.local.get(['googleDriveSessionId', 'googleDriveConnected']);
+    if (!result.googleDriveSessionId || !result.googleDriveConnected) {
+      showStatus('Please connect to Google Drive first', 'error');
+      return;
+    }
+  } else if (host === 'flickr') {
     const result = await chrome.storage.sync.get(['flickrOAuthToken', 'flickrOAuthTokenSecret']);
     if (!result.flickrOAuthToken || !result.flickrOAuthTokenSecret) {
       showStatus('Please authenticate with Flickr first', 'error');
@@ -540,7 +554,10 @@ async function processUrl(url) {
     let newUrl;
 
     console.log('Uploading to:', host);
-    if (host === 'catbox') {
+    if (host === 'gdrive') {
+      const data = await chrome.storage.local.get(['googleDriveSessionId']);
+      newUrl = await uploadToGoogleDrive(imageBlob, data.googleDriveSessionId);
+    } else if (host === 'catbox') {
       newUrl = await uploadToCatbox(imageBlob);
     } else if (host === 'freeimage') {
       newUrl = await uploadToFreeImage(imageBlob);
@@ -820,6 +837,38 @@ async function uploadToGyazo(imageBlob, accessToken) {
     throw new Error('Gyazo returned invalid response: ' + JSON.stringify(data));
   } catch (error) {
     console.error('Gyazo upload error:', error);
+    throw error;
+  }
+}
+
+async function uploadToGoogleDrive(imageBlob, sessionId) {
+  try {
+    // Convert blob to base64 data URL
+    const fileData = await blobToBase64(imageBlob);
+
+    // Generate filename from blob type
+    const extension = imageBlob.type.split('/')[1] || 'png';
+    const filename = `image_${Date.now()}.${extension}`;
+
+    const response = await chrome.runtime.sendMessage({
+      action: 'googleDriveUpload',
+      fileData: fileData,
+      fileName: filename,
+      sessionId: sessionId
+    });
+
+    if (response.success) {
+      return response.url;
+    } else {
+      // Check if it's a session error
+      if (response.error && response.error.includes('Unauthorized')) {
+        await chrome.storage.local.set({ googleDriveConnected: false });
+        await updateConvertGDriveStatus();
+      }
+      throw new Error(response.error);
+    }
+  } catch (error) {
+    console.error('Google Drive upload error:', error);
     throw error;
   }
 }
@@ -1342,6 +1391,73 @@ if (imageGdriveUnlink) {
     await updateImageGDriveStatus();
 
     imageGdriveUnlink.disabled = false;
+  });
+}
+
+// === Convert Tab Google Drive Functions ===
+
+async function updateConvertGDriveStatus() {
+  if (!convertGdriveStatus) return;
+
+  const data = await chrome.storage.local.get(['googleDriveSessionId', 'googleDriveConnected']);
+  const isConnected = data.googleDriveSessionId && data.googleDriveConnected;
+
+  if (isConnected) {
+    convertGdriveStatus.textContent = '✓ Connected';
+    convertGdriveStatus.style.color = '#38ef7d';
+    if (convertGdriveConnect) {
+      convertGdriveConnect.textContent = 'Reconnect';
+      convertGdriveConnect.classList.remove('primary');
+      convertGdriveConnect.classList.add('secondary');
+    }
+    if (convertGdriveUnlink) {
+      convertGdriveUnlink.style.display = 'inline-block';
+    }
+  } else {
+    convertGdriveStatus.textContent = 'Not connected';
+    convertGdriveStatus.style.color = 'var(--text-dimmed)';
+    if (convertGdriveConnect) {
+      convertGdriveConnect.textContent = 'Connect to Google Drive';
+      convertGdriveConnect.classList.remove('secondary');
+      convertGdriveConnect.classList.add('primary');
+    }
+    if (convertGdriveUnlink) {
+      convertGdriveUnlink.style.display = 'none';
+    }
+  }
+}
+
+async function handleConvertGDriveConnect() {
+  convertGdriveConnect.disabled = true;
+  convertGdriveStatus.textContent = 'Connecting...';
+
+  const response = await chrome.runtime.sendMessage({ action: 'googleDriveOAuth' });
+
+  if (response.success) {
+    await updateConvertGDriveStatus();
+    showStatus('Connected to Google Drive successfully!', 'success');
+  } else {
+    showStatus('Failed to connect: ' + response.error, 'error');
+    await updateConvertGDriveStatus();
+  }
+
+  convertGdriveConnect.disabled = false;
+}
+
+// Event listeners for Convert tab Google Drive
+if (convertGdriveConnect) {
+  convertGdriveConnect.addEventListener('click', handleConvertGDriveConnect);
+}
+
+if (convertGdriveUnlink) {
+  convertGdriveUnlink.addEventListener('click', async () => {
+    convertGdriveUnlink.disabled = true;
+
+    await chrome.storage.local.remove(['googleDriveSessionId', 'googleDriveConnected', 'googleDriveConnectedAt']);
+    await updateConvertGDriveStatus();
+    showStatus('Disconnected from Google Drive', 'success');
+
+    convertGdriveUnlink.disabled = false;
   });
 }
 

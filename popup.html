@@ -37,6 +37,7 @@
         <option value="vgy">vgy.me</option>
         <option value="flickr">Flickr</option>
         <option value="gyazo">Gyazo</option>
+        <option value="gdrive">Google Drive</option>
       </select>
       <small class="service-info" id="service-info" style="display: none; margin-top: 6px; color: var(--text-dimmed); font-size: 11px;"></small>
     </div>
@@ -46,6 +47,18 @@
         <span id="oauth-text">Connect to Flickr</span>
       </button>
       <small id="oauth-status" style="display: block; color: var(--text-dimmed); font-size: 11px; text-align: center;"></small>
+    </div>
+
+    <!-- Google Drive Connection (Convert Tab) -->
+    <div class="gdrive-connection" id="convert-gdrive-connection" style="display: none;">
+      <div style="background: var(--bg-secondary); padding: 12px; border-radius: 8px; margin-bottom: 12px;">
+        <label style="display: block; margin-bottom: 8px;">Google Drive Connection</label>
+        <div class="button-group" style="margin-bottom: 8px;">
+          <button id="convert-gdrive-connect" class="primary">Connect to Google Drive</button>
+          <button id="convert-gdrive-unlink" class="secondary" style="display: none;">Unlink</button>
+        </div>
+        <small id="convert-gdrive-status" style="display: block; color: var(--text-dimmed); font-size: 11px; text-align: center;"></small>
+      </div>
     </div>
 
     <div class="api-settings" id="api-settings" style="display: none;">
