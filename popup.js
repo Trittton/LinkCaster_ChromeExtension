@@ -1140,19 +1140,36 @@ async function renderHistory() {
     });
 
     return `
-      <div class="history-item">
+      <div class="history-item" data-url="${escapeHtml(item.url)}">
         <div class="history-item-header">
           <div class="history-item-name">${escapeHtml(item.fileName)}</div>
           <div class="history-item-date">${dateStr}</div>
         </div>
         <div class="history-item-url">${escapeHtml(item.url)}</div>
         <div class="history-item-actions">
-          <button class="primary" onclick="copyHistoryUrl('${escapeHtml(item.url)}')">Copy Link</button>
-          <button class="secondary" onclick="openHistoryUrl('${escapeHtml(item.url)}')">Open</button>
+          <button class="primary copy-history-btn">Copy Link</button>
+          <button class="secondary open-history-btn">Open</button>
         </div>
       </div>
     `;
   }).join('');
+
+  // Add event listeners to history buttons
+  document.querySelectorAll('.copy-history-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const url = e.target.closest('.history-item').dataset.url;
+      navigator.clipboard.writeText(url).then(() => {
+        showStatus('Link copied to clipboard!', 'success');
+      });
+    });
+  });
+
+  document.querySelectorAll('.open-history-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const url = e.target.closest('.history-item').dataset.url;
+      chrome.tabs.create({ url: url });
+    });
+  });
 }
 
 // Helper function to escape HTML
@@ -1161,18 +1178,6 @@ function escapeHtml(text) {
   div.textContent = text;
   return div.innerHTML;
 }
-
-// Copy history URL
-window.copyHistoryUrl = function(url) {
-  navigator.clipboard.writeText(url).then(() => {
-    showStatus('Link copied to clipboard!', 'success');
-  });
-};
-
-// Open history URL
-window.openHistoryUrl = function(url) {
-  chrome.tabs.create({ url: url });
-};
 
 // History button toggle
 if (videoHistoryBtn) {
