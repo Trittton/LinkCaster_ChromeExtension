@@ -94,10 +94,15 @@
       <div class="gdrive-section">
         <div class="gdrive-header">
           <h3>Google Drive Upload</h3>
-          <button id="gdrive-settings-btn" class="icon-btn small" title="Google Drive Settings">
-            <span>⚙️</span>
-            <span class="error-badge" id="gdrive-error-badge" style="display: none;"></span>
-          </button>
+          <div style="display: flex; gap: 4px;">
+            <button id="video-history-btn" class="icon-btn small" title="Upload History">
+              <span>📜</span>
+            </button>
+            <button id="gdrive-settings-btn" class="icon-btn small" title="Google Drive Settings">
+              <span>⚙️</span>
+              <span class="error-badge" id="gdrive-error-badge" style="display: none;"></span>
+            </button>
+          </div>
         </div>
 
         <!-- First-time connection prompt -->
@@ -124,6 +129,17 @@
             <button id="gdrive-unlink" class="secondary" style="display: none;">Unlink</button>
           </div>
           <small id="gdrive-status" style="display: block; color: var(--text-dimmed); font-size: 11px; text-align: center; margin-top: 6px;"></small>
+        </div>
+
+        <!-- History Panel -->
+        <div class="history-panel" id="video-history-panel" style="display: none;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <label style="margin: 0;">Upload History</label>
+            <button id="clear-video-history" class="secondary" style="font-size: 11px; padding: 4px 8px;">Clear All</button>
+          </div>
+          <div id="video-history-list" style="max-height: 300px; overflow-y: auto;">
+            <p style="text-align: center; color: var(--text-dimmed); font-size: 12px; padding: 20px;">No uploads yet</p>
+          </div>
         </div>
 
         <!-- Upload section (visible when connected) -->

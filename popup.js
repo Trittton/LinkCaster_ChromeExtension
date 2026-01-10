@@ -873,6 +873,12 @@ const videoOutputSection = document.getElementById('video-output-section');
 const videoOutputText = document.getElementById('video-output-text');
 const videoCopyBtn = document.getElementById('video-copy-btn');
 
+// DOM Elements for History
+const videoHistoryBtn = document.getElementById('video-history-btn');
+const videoHistoryPanel = document.getElementById('video-history-panel');
+const videoHistoryList = document.getElementById('video-history-list');
+const clearVideoHistory = document.getElementById('clear-video-history');
+
 // Google Drive UI Update
 async function updateGDriveUI() {
   const data = await chrome.storage.local.get(['googleDriveSessionId', 'googleDriveConnected', 'googleDriveConnectedAt']);
@@ -1036,6 +1042,9 @@ if (uploadVideoBtn) {
             videoOutputText.value = response.url;
             videoOutputSection.style.display = 'block';
 
+            // Add to history
+            await addToHistory(file.name, response.url, response.fileId);
+
             showStatus('Video uploaded successfully!', 'success');
 
             setTimeout(() => {
@@ -1085,3 +1094,107 @@ switchTab = function(tabName) {
     updateGDriveUI();
   }
 };
+
+// ===== Upload History System =====
+
+// Add upload to history
+async function addToHistory(fileName, url, fileId) {
+  const data = await chrome.storage.local.get(['videoUploadHistory']);
+  const history = data.videoUploadHistory || [];
+
+  history.unshift({
+    fileName: fileName,
+    url: url,
+    fileId: fileId,
+    timestamp: Date.now()
+  });
+
+  // Keep only last 50 uploads
+  if (history.length > 50) {
+    history.length = 50;
+  }
+
+  await chrome.storage.local.set({ videoUploadHistory: history });
+  await renderHistory();
+}
+
+// Render history list
+async function renderHistory() {
+  if (!videoHistoryList) return;
+
+  const data = await chrome.storage.local.get(['videoUploadHistory']);
+  const history = data.videoUploadHistory || [];
+
+  if (history.length === 0) {
+    videoHistoryList.innerHTML = '<p style="text-align: center; color: var(--text-dimmed); font-size: 12px; padding: 20px;">No uploads yet</p>';
+    return;
+  }
+
+  videoHistoryList.innerHTML = history.map(item => {
+    const date = new Date(item.timestamp);
+    const dateStr = date.toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+
+    return `
+      <div class="history-item">
+        <div class="history-item-header">
+          <div class="history-item-name">${escapeHtml(item.fileName)}</div>
+          <div class="history-item-date">${dateStr}</div>
+        </div>
+        <div class="history-item-url">${escapeHtml(item.url)}</div>
+        <div class="history-item-actions">
+          <button class="primary" onclick="copyHistoryUrl('${escapeHtml(item.url)}')">Copy Link</button>
+          <button class="secondary" onclick="openHistoryUrl('${escapeHtml(item.url)}')">Open</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+// Helper function to escape HTML
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// Copy history URL
+window.copyHistoryUrl = function(url) {
+  navigator.clipboard.writeText(url).then(() => {
+    showStatus('Link copied to clipboard!', 'success');
+  });
+};
+
+// Open history URL
+window.openHistoryUrl = function(url) {
+  chrome.tabs.create({ url: url });
+};
+
+// History button toggle
+if (videoHistoryBtn) {
+  videoHistoryBtn.addEventListener('click', () => {
+    const isVisible = videoHistoryPanel.style.display !== 'none';
+    videoHistoryPanel.style.display = isVisible ? 'none' : 'block';
+    if (!isVisible) {
+      // Close settings panel if open
+      if (gdriveSettings) gdriveSettings.style.display = 'none';
+      renderHistory();
+    }
+  });
+}
+
+// Clear history button
+if (clearVideoHistory) {
+  clearVideoHistory.addEventListener('click', async () => {
+    const confirmed = confirm('Clear all upload history?');
+    if (!confirmed) return;
+
+    await chrome.storage.local.set({ videoUploadHistory: [] });
+    await renderHistory();
+    showStatus('History cleared', 'success');
+  });
+}
