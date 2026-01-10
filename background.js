@@ -409,9 +409,28 @@ async function handleGoogleDriveOAuth() {
   }
 }
 
+async function verifyGoogleDriveSession(sessionId) {
+  try {
+    const verifyResponse = await fetch(`${BACKEND_URL}/auth/verify/${sessionId}`);
+    const verifyData = await verifyResponse.json();
+    return verifyData.authenticated === true;
+  } catch (error) {
+    console.error('Session verification error:', error);
+    return false;
+  }
+}
+
 async function handleGoogleDriveUpload(fileData, fileName, sessionId) {
   try {
     console.log(`Uploading ${fileName} to Google Drive...`);
+    console.log('Session ID:', sessionId);
+    console.log('File data length:', fileData?.length);
+
+    // Verify session before upload
+    const isSessionValid = await verifyGoogleDriveSession(sessionId);
+    if (!isSessionValid) {
+      throw new Error('Unauthorized: Invalid session ID. Please reconnect to Google Drive.');
+    }
 
     const uploadResponse = await fetch(`${BACKEND_URL}/api/upload`, {
       method: 'POST',
@@ -425,9 +444,14 @@ async function handleGoogleDriveUpload(fileData, fileName, sessionId) {
       })
     });
 
+    console.log('Upload response status:', uploadResponse.status);
     const result = await uploadResponse.json();
+    console.log('Upload response body:', result);
 
     if (!uploadResponse.ok) {
+      if (uploadResponse.status === 401) {
+        throw new Error('Unauthorized: Invalid session ID. Please reconnect to Google Drive.');
+      }
       throw new Error(result.error || 'Upload failed');
     }
 

@@ -1051,6 +1051,13 @@ if (uploadVideoBtn) {
               videoProgress.style.display = 'none';
             }, 2000);
           } else {
+            // Check if it's a session error
+            if (response.error && response.error.includes('Unauthorized')) {
+              // Mark as disconnected
+              await chrome.storage.local.set({ googleDriveConnected: false });
+              await updateGDriveStatus();
+              await updateGDriveUI();
+            }
             throw new Error(response.error);
           }
         } catch (error) {
@@ -1435,6 +1442,12 @@ if (uploadImagesBtn) {
                   if (response.success) {
                     resolve(response.url);
                   } else {
+                    // Check if it's a session error
+                    if (response.error && response.error.includes('Unauthorized')) {
+                      // Mark as disconnected
+                      await chrome.storage.local.set({ googleDriveConnected: false });
+                      await updateImageGDriveStatus();
+                    }
                     reject(new Error(response.error));
                   }
                 } catch (error) {
