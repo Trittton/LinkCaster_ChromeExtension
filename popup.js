@@ -1859,12 +1859,12 @@ async function scanFolder(folderHandle, fileType, timeFilterMinutes) {
   if (!folderHandle) return [];
 
   try {
-    // Check permission status
-    const permission = await folderHandle.queryPermission({ mode: 'read' });
+    // Check permission status - try read first
+    let permission = await folderHandle.queryPermission({ mode: 'read' });
+
+    // If read permission not granted, the folder handle is expired
     if (permission !== 'granted') {
-      // Permission not granted - don't request automatically on page load
-      // User needs to click the folder select button again or refresh button
-      console.log('Folder permission not granted, user needs to reselect folder');
+      console.log('Folder permission expired, user needs to reselect folder');
       return [];
     }
 
@@ -2125,8 +2125,16 @@ if (videoTimeFilter) {
         // Permission expired, need to reselect
         if (imageFolderPath) {
           const folderName = savedImageFolderName || 'folder';
-          imageFolderPath.textContent = `"${folderName}" - permission needed, click to reselect`;
-          imageFolderPath.style.color = '#ff6b6b';
+          imageFolderPath.innerHTML = `<span style="color: #ff6b6b;">⚠️ Permission expired for "${folderName}"</span><br><span style="font-size: 10px;">Click "Select Folder to Monitor" above to restore</span>`;
+        }
+
+        // Auto-open settings panel on Upload Img tab if it's the current tab
+        const currentTab = document.querySelector('.tab-btn.active');
+        if (currentTab && currentTab.dataset.tab === 'upload-img') {
+          const settingsPanel = document.getElementById('image-settings-panel');
+          if (settingsPanel) {
+            settingsPanel.style.display = 'block';
+          }
         }
       }
     }
@@ -2145,8 +2153,16 @@ if (videoTimeFilter) {
         // Permission expired, need to reselect
         if (videoFolderPath) {
           const folderName = savedVideoFolderName || 'folder';
-          videoFolderPath.textContent = `"${folderName}" - permission needed, click to reselect`;
-          videoFolderPath.style.color = '#ff6b6b';
+          videoFolderPath.innerHTML = `<span style="color: #ff6b6b;">⚠️ Permission expired for "${folderName}"</span><br><span style="font-size: 10px;">Click "Select Folder to Monitor" above to restore</span>`;
+        }
+
+        // Auto-open settings panel on Upload Vid tab if it's the current tab
+        const currentTab = document.querySelector('.tab-btn.active');
+        if (currentTab && currentTab.dataset.tab === 'upload-vid') {
+          const settingsPanel = document.getElementById('gdrive-settings');
+          if (settingsPanel) {
+            settingsPanel.style.display = 'block';
+          }
         }
       }
     }
