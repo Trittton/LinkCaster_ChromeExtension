@@ -431,8 +431,8 @@ async function handleGoogleDriveUpload(fileData, fileName, sessionId) {
       throw new Error(result.error || 'Upload failed');
     }
 
-    console.log('Upload successful:', result.previewUrl);
-    return { success: true, url: result.previewUrl, fileId: result.fileId };
+    console.log('Upload successful:', result.url);
+    return { success: true, url: result.url, fileId: result.fileId };
   } catch (error) {
     console.error('Google Drive upload error:', error);
     return { success: false, error: error.message };
