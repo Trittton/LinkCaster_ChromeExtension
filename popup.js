@@ -1859,13 +1859,13 @@ async function scanFolder(folderHandle, fileType, timeFilterMinutes) {
   if (!folderHandle) return [];
 
   try {
-    // Request permission if needed
+    // Check permission status
     const permission = await folderHandle.queryPermission({ mode: 'read' });
     if (permission !== 'granted') {
-      const newPermission = await folderHandle.requestPermission({ mode: 'read' });
-      if (newPermission !== 'granted') {
-        throw new Error('Permission denied');
-      }
+      // Permission not granted - don't request automatically on page load
+      // User needs to click the folder select button again or refresh button
+      console.log('Folder permission not granted, user needs to reselect folder');
+      return [];
     }
 
     const files = [];
@@ -2086,21 +2086,41 @@ if (videoTimeFilter) {
 
     // Update folder paths and start monitoring
     if (imageFolderHandle) {
-      if (imageFolderPath) {
-        imageFolderPath.textContent = `Monitoring: ${imageFolderHandle.name}`;
-        imageFolderPath.style.color = '#38ef7d';
+      // Check if we have permission
+      const permission = await imageFolderHandle.queryPermission({ mode: 'read' });
+      if (permission === 'granted') {
+        if (imageFolderPath) {
+          imageFolderPath.textContent = `Monitoring: ${imageFolderHandle.name}`;
+          imageFolderPath.style.color = '#38ef7d';
+        }
+        await updateImageFiles();
+        imageMonitorInterval = setInterval(updateImageFiles, 10000);
+      } else {
+        // Permission expired, need to reselect
+        if (imageFolderPath) {
+          imageFolderPath.textContent = `Permission needed - please reselect folder`;
+          imageFolderPath.style.color = '#ff6b6b';
+        }
       }
-      await updateImageFiles();
-      imageMonitorInterval = setInterval(updateImageFiles, 10000);
     }
 
     if (videoFolderHandle) {
-      if (videoFolderPath) {
-        videoFolderPath.textContent = `Monitoring: ${videoFolderHandle.name}`;
-        videoFolderPath.style.color = '#38ef7d';
+      // Check if we have permission
+      const permission = await videoFolderHandle.queryPermission({ mode: 'read' });
+      if (permission === 'granted') {
+        if (videoFolderPath) {
+          videoFolderPath.textContent = `Monitoring: ${videoFolderHandle.name}`;
+          videoFolderPath.style.color = '#38ef7d';
+        }
+        await updateVideoFiles();
+        videoMonitorInterval = setInterval(updateVideoFiles, 10000);
+      } else {
+        // Permission expired, need to reselect
+        if (videoFolderPath) {
+          videoFolderPath.textContent = `Permission needed - please reselect folder`;
+          videoFolderPath.style.color = '#ff6b6b';
+        }
       }
-      await updateVideoFiles();
-      videoMonitorInterval = setInterval(updateVideoFiles, 10000);
     }
   } catch (error) {
     console.error('Error initializing file monitoring:', error);
