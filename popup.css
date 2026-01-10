@@ -765,3 +765,54 @@ textarea::-webkit-scrollbar-thumb:hover {
 #video-history-list::-webkit-scrollbar-thumb:hover {
   background: var(--text-dimmed);
 }
+
+/* Upload Img Section */
+.upload-section {
+  padding: 12px 0;
+}
+
+.upload-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.upload-header h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.settings-panel {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+#image-file-input {
+  width: 100%;
+  padding: 8px;
+  background: var(--input-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+#image-file-input::-webkit-file-upload-button {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 4px 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+#image-file-input::-webkit-file-upload-button:hover {
+  background: var(--bg-tertiary);
+}

@@ -83,9 +83,58 @@
 
     <!-- Upload Img Tab -->
     <div id="tab-upload-img" class="tab-content">
-      <div class="tab-placeholder">
-        <p>Upload images from your computer</p>
-        <p style="font-size: 12px; color: var(--text-dimmed);">Coming soon...</p>
+      <div class="upload-section">
+        <div class="upload-header">
+          <h3>Image Upload</h3>
+          <div style="display: flex; gap: 4px;">
+            <button id="image-history-btn" class="icon-btn small" title="Upload History">
+              <span>📜</span>
+            </button>
+            <button id="image-settings-btn" class="icon-btn small" title="Settings">
+              <span>⚙️</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Settings Panel -->
+        <div class="settings-panel" id="image-settings-panel" style="display: none;">
+          <label>Upload Service</label>
+          <select id="image-service-select" style="width: 100%; margin-top: 8px;">
+            <option value="catbox">Catbox.moe</option>
+            <option value="imgur">Imgur (requires API key)</option>
+          </select>
+        </div>
+
+        <!-- History Panel -->
+        <div class="history-panel" id="image-history-panel" style="display: none;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <label style="margin: 0;">Upload History</label>
+            <button id="clear-image-history" class="secondary" style="font-size: 11px; padding: 4px 8px;">Clear All</button>
+          </div>
+          <div id="image-history-list" style="max-height: 300px; overflow-y: auto;">
+            <p style="text-align: center; color: var(--text-dimmed); font-size: 12px; padding: 20px;">No uploads yet</p>
+          </div>
+        </div>
+
+        <!-- Upload Area -->
+        <div class="input-section">
+          <label>Select Images</label>
+          <input type="file" id="image-file-input" accept="image/*" multiple style="margin-bottom: 8px;">
+          <button id="upload-images-btn" class="primary" style="width: 100%;">Upload Images</button>
+        </div>
+
+        <div class="progress" id="image-progress" style="display: none;">
+          <div class="progress-bar">
+            <div class="progress-fill" id="image-progress-fill"></div>
+          </div>
+          <p id="image-progress-text">Uploading...</p>
+        </div>
+
+        <div class="output-section" id="image-output-section" style="display: none;">
+          <label>Image Links</label>
+          <textarea id="image-output-text" rows="6" readonly></textarea>
+          <button id="image-copy-btn" class="primary">Copy All Links</button>
+        </div>
       </div>
     </div>
 

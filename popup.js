@@ -1203,3 +1203,230 @@ if (clearVideoHistory) {
     showStatus('History cleared', 'success');
   });
 }
+
+// ===== Upload Img Tab =====
+
+// DOM Elements for Upload Img
+const imageSettingsBtn = document.getElementById('image-settings-btn');
+const imageSettingsPanel = document.getElementById('image-settings-panel');
+const imageServiceSelect = document.getElementById('image-service-select');
+const imageHistoryBtn = document.getElementById('image-history-btn');
+const imageHistoryPanel = document.getElementById('image-history-panel');
+const imageHistoryList = document.getElementById('image-history-list');
+const clearImageHistory = document.getElementById('clear-image-history');
+const imageFileInput = document.getElementById('image-file-input');
+const uploadImagesBtn = document.getElementById('upload-images-btn');
+const imageProgress = document.getElementById('image-progress');
+const imageProgressFill = document.getElementById('image-progress-fill');
+const imageProgressText = document.getElementById('image-progress-text');
+const imageOutputSection = document.getElementById('image-output-section');
+const imageOutputText = document.getElementById('image-output-text');
+const imageCopyBtn = document.getElementById('image-copy-btn');
+
+// Load saved service selection
+chrome.storage.local.get(['imageUploadService'], (result) => {
+  if (result.imageUploadService && imageServiceSelect) {
+    imageServiceSelect.value = result.imageUploadService;
+  }
+});
+
+// Save service selection
+if (imageServiceSelect) {
+  imageServiceSelect.addEventListener('change', () => {
+    chrome.storage.local.set({ imageUploadService: imageServiceSelect.value });
+  });
+}
+
+// Settings button toggle
+if (imageSettingsBtn) {
+  imageSettingsBtn.addEventListener('click', () => {
+    const isVisible = imageSettingsPanel.style.display !== 'none';
+    imageSettingsPanel.style.display = isVisible ? 'none' : 'block';
+    if (!isVisible && imageHistoryPanel) {
+      imageHistoryPanel.style.display = 'none';
+    }
+  });
+}
+
+// History button toggle
+if (imageHistoryBtn) {
+  imageHistoryBtn.addEventListener('click', () => {
+    const isVisible = imageHistoryPanel.style.display !== 'none';
+    imageHistoryPanel.style.display = isVisible ? 'none' : 'block';
+    if (!isVisible) {
+      if (imageSettingsPanel) imageSettingsPanel.style.display = 'none';
+      renderImageHistory();
+    }
+  });
+}
+
+// Upload images to Catbox
+async function uploadToCatbox(file) {
+  const formData = new FormData();
+  formData.append('reqtype', 'fileupload');
+  formData.append('fileToUpload', file);
+
+  const response = await fetch('https://catbox.moe/user/api.php', {
+    method: 'POST',
+    body: formData
+  });
+
+  if (!response.ok) {
+    throw new Error('Upload failed');
+  }
+
+  return await response.text();
+}
+
+// Upload images button handler
+if (uploadImagesBtn) {
+  uploadImagesBtn.addEventListener('click', async () => {
+    const files = imageFileInput.files;
+    if (!files || files.length === 0) {
+      showStatus('Please select at least one image', 'error');
+      return;
+    }
+
+    const service = imageServiceSelect ? imageServiceSelect.value : 'catbox';
+
+    if (service === 'imgur') {
+      showStatus('Imgur upload requires API key configuration', 'error');
+      return;
+    }
+
+    uploadImagesBtn.disabled = true;
+    imageProgress.style.display = 'block';
+    imageProgressText.textContent = `Uploading 0/${files.length} images...`;
+    imageProgressFill.style.width = '0%';
+
+    const urls = [];
+    let completed = 0;
+
+    try {
+      for (const file of files) {
+        try {
+          const url = await uploadToCatbox(file);
+          urls.push(url);
+
+          // Add to history
+          await addToImageHistory(file.name, url);
+
+          completed++;
+          const percentage = (completed / files.length) * 100;
+          imageProgressFill.style.width = percentage + '%';
+          imageProgressText.textContent = `Uploaded ${completed}/${files.length} images`;
+        } catch (error) {
+          console.error(`Failed to upload ${file.name}:`, error);
+          urls.push(`Error: ${file.name} upload failed`);
+          completed++;
+        }
+      }
+
+      imageOutputText.value = urls.join('\n');
+      imageOutputSection.style.display = 'block';
+
+      showStatus(`Successfully uploaded ${urls.filter(u => !u.startsWith('Error')).length}/${files.length} images!`, 'success');
+
+      setTimeout(() => {
+        imageProgress.style.display = 'none';
+      }, 2000);
+    } catch (error) {
+      showStatus('Upload failed: ' + error.message, 'error');
+      imageProgress.style.display = 'none';
+    } finally {
+      uploadImagesBtn.disabled = false;
+    }
+  });
+}
+
+// Copy images button
+if (imageCopyBtn) {
+  imageCopyBtn.addEventListener('click', () => {
+    imageOutputText.select();
+    document.execCommand('copy');
+    showStatus('Links copied to clipboard!', 'success');
+  });
+}
+
+// Image History Functions
+async function addToImageHistory(fileName, url) {
+  const data = await chrome.storage.local.get(['imageUploadHistory']);
+  const history = data.imageUploadHistory || [];
+
+  history.unshift({
+    fileName: fileName,
+    url: url,
+    timestamp: Date.now()
+  });
+
+  if (history.length > 50) {
+    history.length = 50;
+  }
+
+  await chrome.storage.local.set({ imageUploadHistory: history });
+}
+
+async function renderImageHistory() {
+  if (!imageHistoryList) return;
+
+  const data = await chrome.storage.local.get(['imageUploadHistory']);
+  const history = data.imageUploadHistory || [];
+
+  if (history.length === 0) {
+    imageHistoryList.innerHTML = '<p style="text-align: center; color: var(--text-dimmed); font-size: 12px; padding: 20px;">No uploads yet</p>';
+    return;
+  }
+
+  imageHistoryList.innerHTML = history.map(item => {
+    const date = new Date(item.timestamp);
+    const dateStr = date.toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+
+    return `
+      <div class="history-item" data-url="${escapeHtml(item.url)}">
+        <div class="history-item-header">
+          <div class="history-item-name">${escapeHtml(item.fileName)}</div>
+          <div class="history-item-date">${dateStr}</div>
+        </div>
+        <div class="history-item-url">${escapeHtml(item.url)}</div>
+        <div class="history-item-actions">
+          <button class="primary copy-image-history-btn">Copy Link</button>
+          <button class="secondary open-image-history-btn">Open</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  // Add event listeners
+  document.querySelectorAll('.copy-image-history-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const url = e.target.closest('.history-item').dataset.url;
+      navigator.clipboard.writeText(url).then(() => {
+        showStatus('Link copied to clipboard!', 'success');
+      });
+    });
+  });
+
+  document.querySelectorAll('.open-image-history-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const url = e.target.closest('.history-item').dataset.url;
+      chrome.tabs.create({ url: url });
+    });
+  });
+}
+
+// Clear image history button
+if (clearImageHistory) {
+  clearImageHistory.addEventListener('click', async () => {
+    const confirmed = confirm('Clear all image upload history?');
+    if (!confirmed) return;
+
+    await chrome.storage.local.set({ imageUploadHistory: [] });
+    await renderImageHistory();
+    showStatus('History cleared', 'success');
+  });
+}
