@@ -2010,12 +2010,10 @@ if (imageSelectFolder) {
         imageFolderPath.style.color = '#38ef7d';
       }
 
-      // Start monitoring
+      // Load initial files
       await updateImageFiles();
-      if (imageMonitorInterval) clearInterval(imageMonitorInterval);
-      imageMonitorInterval = setInterval(updateImageFiles, 10000); // Every 10 seconds
 
-      showStatus(`Now monitoring folder: ${handle.name}`, 'success');
+      showStatus(`Folder selected: ${handle.name}`, 'success');
     } catch (error) {
       if (error.name !== 'AbortError') {
         showStatus('Failed to select folder: ' + error.message, 'error');
@@ -2039,12 +2037,10 @@ if (videoSelectFolder) {
         videoFolderPath.style.color = '#38ef7d';
       }
 
-      // Start monitoring
+      // Load initial files
       await updateVideoFiles();
-      if (videoMonitorInterval) clearInterval(videoMonitorInterval);
-      videoMonitorInterval = setInterval(updateVideoFiles, 10000); // Every 10 seconds
 
-      showStatus(`Now monitoring folder: ${handle.name}`, 'success');
+      showStatus(`Folder selected: ${handle.name}`, 'success');
     } catch (error) {
       if (error.name !== 'AbortError') {
         showStatus('Failed to select folder: ' + error.message, 'error');
@@ -2053,9 +2049,23 @@ if (videoSelectFolder) {
   });
 }
 
-// Refresh buttons
+// Refresh buttons - handle permission restoration if needed
 if (imageRefreshFiles) {
   imageRefreshFiles.addEventListener('click', async () => {
+    if (imageFolderHandle) {
+      // Check if permission is still valid
+      const permission = await imageFolderHandle.queryPermission({ mode: 'read' });
+      if (permission !== 'granted') {
+        // Permission expired, request it
+        try {
+          await imageFolderHandle.requestPermission({ mode: 'read' });
+        } catch (error) {
+          showStatus('Permission denied. Please select folder again.', 'error');
+          return;
+        }
+      }
+    }
+
     await updateImageFiles();
     showStatus('Files refreshed', 'success');
   });
@@ -2063,6 +2073,20 @@ if (imageRefreshFiles) {
 
 if (videoRefreshFiles) {
   videoRefreshFiles.addEventListener('click', async () => {
+    if (videoFolderHandle) {
+      // Check if permission is still valid
+      const permission = await videoFolderHandle.queryPermission({ mode: 'read' });
+      if (permission !== 'granted') {
+        // Permission expired, request it
+        try {
+          await videoFolderHandle.requestPermission({ mode: 'read' });
+        } catch (error) {
+          showStatus('Permission denied. Please select folder again.', 'error');
+          return;
+        }
+      }
+    }
+
     await updateVideoFiles();
     showStatus('Files refreshed', 'success');
   });
@@ -2120,57 +2144,17 @@ if (videoTimeFilter) {
           imageFolderPath.style.color = '#38ef7d';
         }
         await updateImageFiles();
-        imageMonitorInterval = setInterval(updateImageFiles, 10000);
+        // No auto-refresh interval - user will click Refresh button when needed
       } else {
-        // Permission expired, auto-restore folder selection
+        // Permission expired - show folder name and instructions
         const folderName = savedImageFolderName || 'folder';
+        if (imageFolderPath) {
+          imageFolderPath.innerHTML = `<span style="color: #ffa500;">"${folderName}" - Click Refresh to load files</span>`;
+        }
 
-        // Auto-open settings panel
-        const currentTab = document.querySelector('.tab-btn.active');
-        if (currentTab && currentTab.dataset.tab === 'upload-img') {
-          const settingsPanel = document.getElementById('image-settings-panel');
-          if (settingsPanel) {
-            settingsPanel.style.display = 'block';
-          }
-
-          // Show restoring message
-          if (imageFolderPath) {
-            imageFolderPath.innerHTML = `<span style="color: #ffa500;">🔄 Restoring "${folderName}"...</span>`;
-          }
-
-          // Auto-trigger folder picker after a short delay
-          setTimeout(async () => {
-            try {
-              const handle = await window.showDirectoryPicker({ mode: 'read' });
-              imageFolderHandle = handle;
-              await saveFolderHandle('imageFolderHandle', handle);
-              await chrome.storage.local.set({ imageFolderName: handle.name });
-
-              if (imageFolderPath) {
-                imageFolderPath.textContent = `Monitoring: ${handle.name}`;
-                imageFolderPath.style.color = '#38ef7d';
-              }
-
-              await updateImageFiles();
-              if (imageMonitorInterval) clearInterval(imageMonitorInterval);
-              imageMonitorInterval = setInterval(updateImageFiles, 10000);
-
-              showStatus(`Folder restored: ${handle.name}`, 'success');
-            } catch (error) {
-              if (error.name !== 'AbortError') {
-                console.error('Failed to restore folder:', error);
-              }
-              // User cancelled or error - show helpful message
-              if (imageFolderPath) {
-                imageFolderPath.innerHTML = `<span style="color: #ff6b6b;">Folder not restored</span><br><span style="font-size: 10px;">Click "Select Folder to Monitor" to try again</span>`;
-              }
-            }
-          }, 500);
-        } else {
-          // Not on the correct tab, just show message
-          if (imageFolderPath) {
-            imageFolderPath.innerHTML = `<span style="color: #ff6b6b;">Permission needed for "${folderName}"</span><br><span style="font-size: 10px;">Will restore when you switch to Upload Img tab</span>`;
-          }
+        // Show detected files section with instructions
+        if (imageDetectedFiles) {
+          imageDetectedFiles.style.display = 'block';
         }
       }
     }
@@ -2184,57 +2168,17 @@ if (videoTimeFilter) {
           videoFolderPath.style.color = '#38ef7d';
         }
         await updateVideoFiles();
-        videoMonitorInterval = setInterval(updateVideoFiles, 10000);
+        // No auto-refresh interval - user will click Refresh button when needed
       } else {
-        // Permission expired, auto-restore folder selection
+        // Permission expired - show folder name and instructions
         const folderName = savedVideoFolderName || 'folder';
+        if (videoFolderPath) {
+          videoFolderPath.innerHTML = `<span style="color: #ffa500;">"${folderName}" - Click Refresh to load files</span>`;
+        }
 
-        // Auto-open settings panel
-        const currentTab = document.querySelector('.tab-btn.active');
-        if (currentTab && currentTab.dataset.tab === 'upload-vid') {
-          const settingsPanel = document.getElementById('gdrive-settings');
-          if (settingsPanel) {
-            settingsPanel.style.display = 'block';
-          }
-
-          // Show restoring message
-          if (videoFolderPath) {
-            videoFolderPath.innerHTML = `<span style="color: #ffa500;">🔄 Restoring "${folderName}"...</span>`;
-          }
-
-          // Auto-trigger folder picker after a short delay
-          setTimeout(async () => {
-            try {
-              const handle = await window.showDirectoryPicker({ mode: 'read' });
-              videoFolderHandle = handle;
-              await saveFolderHandle('videoFolderHandle', handle);
-              await chrome.storage.local.set({ videoFolderName: handle.name });
-
-              if (videoFolderPath) {
-                videoFolderPath.textContent = `Monitoring: ${handle.name}`;
-                videoFolderPath.style.color = '#38ef7d';
-              }
-
-              await updateVideoFiles();
-              if (videoMonitorInterval) clearInterval(videoMonitorInterval);
-              videoMonitorInterval = setInterval(updateVideoFiles, 10000);
-
-              showStatus(`Folder restored: ${handle.name}`, 'success');
-            } catch (error) {
-              if (error.name !== 'AbortError') {
-                console.error('Failed to restore folder:', error);
-              }
-              // User cancelled or error - show helpful message
-              if (videoFolderPath) {
-                videoFolderPath.innerHTML = `<span style="color: #ff6b6b;">Folder not restored</span><br><span style="font-size: 10px;">Click "Select Folder to Monitor" to try again</span>`;
-              }
-            }
-          }, 500);
-        } else {
-          // Not on the correct tab, just show message
-          if (videoFolderPath) {
-            videoFolderPath.innerHTML = `<span style="color: #ff6b6b;">Permission needed for "${folderName}"</span><br><span style="font-size: 10px;">Will restore when you switch to Upload Vid tab</span>`;
-          }
+        // Show detected files section with instructions
+        if (videoDetectedFiles) {
+          videoDetectedFiles.style.display = 'block';
         }
       }
     }
