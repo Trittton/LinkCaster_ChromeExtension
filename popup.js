@@ -393,9 +393,13 @@ async function authenticateFlickr() {
 function showStatus(message, type) {
   statusDiv.textContent = message;
   statusDiv.className = `status ${type}`;
+  statusDiv.style.display = 'block'; // Ensure it's visible
+
+  // For error messages, show longer (8 seconds instead of 5)
+  const timeout = type === 'error' ? 8000 : 5000;
   setTimeout(() => {
     statusDiv.style.display = 'none';
-  }, 5000);
+  }, timeout);
 }
 
 function handleClear() {
@@ -566,6 +570,17 @@ async function processUrls(urls) {
       const result = await processUrl(url);
       results.push(result);
     } catch (error) {
+      // If Google Drive session expired, stop processing
+      if (error.message === 'GOOGLE_DRIVE_SESSION_EXPIRED') {
+        // Hide progress and show error
+        progress.style.display = 'none';
+        convertBtn.disabled = false;
+
+        // Show alert to user
+        alert('⚠️ Google Drive session expired!\n\nPlease reconnect to Google Drive to continue converting images.');
+        return results; // Return partial results and stop
+      }
+
       results.push({
         original: url,
         new: url,
@@ -622,6 +637,12 @@ async function processUrl(url) {
     };
   } catch (error) {
     console.error('Error processing URL:', url, error);
+
+    // Propagate session expired error to stop processing
+    if (error.message === 'GOOGLE_DRIVE_SESSION_EXPIRED') {
+      throw error;
+    }
+
     return {
       original: url,
       new: url,
@@ -903,9 +924,12 @@ async function uploadToGoogleDrive(imageBlob, sessionId) {
       return response.url;
     } else {
       // Check if it's a session error
-      if (response.error && response.error.includes('Unauthorized')) {
+      if (response.error && (response.error.includes('Unauthorized') || response.error.includes('Invalid session'))) {
         await chrome.storage.local.set({ googleDriveConnected: false });
         await updateConvertGDriveStatus();
+        // Show clear reconnection message
+        showStatus('⚠️ Google Drive session expired. Please reconnect to continue.', 'error');
+        throw new Error('GOOGLE_DRIVE_SESSION_EXPIRED');
       }
       throw new Error(response.error);
     }
@@ -1175,11 +1199,19 @@ if (uploadVideoBtn) {
             }, 2000);
           } else {
             // Check if it's a session error
-            if (response.error && response.error.includes('Unauthorized')) {
+            if (response.error && (response.error.includes('Unauthorized') || response.error.includes('Invalid session'))) {
               // Mark as disconnected
               await chrome.storage.local.set({ googleDriveConnected: false });
               await updateGDriveStatus();
               await updateGDriveUI();
+              // Show clear reconnection message
+              showStatus('⚠️ Google Drive session expired. Please reconnect in Settings.', 'error');
+              videoProgress.style.display = 'none';
+              uploadVideoBtn.disabled = false;
+
+              // Show alert to user
+              alert('⚠️ Google Drive session expired!\n\nPlease reconnect to Google Drive in Settings (⚙️) to continue uploading.');
+              return; // Stop execution
             }
             throw new Error(response.error);
           }
@@ -1653,12 +1685,17 @@ if (uploadImagesBtn) {
                     resolve(response.url);
                   } else {
                     // Check if it's a session error
-                    if (response.error && response.error.includes('Unauthorized')) {
+                    if (response.error && (response.error.includes('Unauthorized') || response.error.includes('Invalid session'))) {
                       // Mark as disconnected
                       await chrome.storage.local.set({ googleDriveConnected: false });
                       await updateImageGDriveStatus();
+                      // Show clear reconnection message
+                      showStatus('⚠️ Google Drive session expired. Please reconnect in Settings.', 'error');
+                      // Stop the upload process
+                      reject(new Error('GOOGLE_DRIVE_SESSION_EXPIRED'));
+                    } else {
+                      reject(new Error(response.error));
                     }
-                    reject(new Error(response.error));
                   }
                 } catch (error) {
                   reject(error);
@@ -1686,6 +1723,18 @@ if (uploadImagesBtn) {
           imageProgressText.textContent = `Uploaded ${completed}/${filesToUpload.length} images`;
         } catch (error) {
           console.error(`Failed to upload ${file.name}:`, error);
+
+          // If session expired, stop the entire upload process
+          if (error.message === 'GOOGLE_DRIVE_SESSION_EXPIRED') {
+            // Stop processing remaining files
+            imageProgress.style.display = 'none';
+            uploadImagesBtn.disabled = false;
+
+            // Show alert to user
+            alert('⚠️ Google Drive session expired!\n\nPlease reconnect to Google Drive in Settings (⚙️) to continue uploading.');
+            return; // Exit the upload loop
+          }
+
           urls.push(`Error: ${file.name} upload failed`);
           completed++;
         }
