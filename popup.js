@@ -1020,7 +1020,7 @@ if (uploadVideoBtn) {
           videoProgressText.textContent = 'Uploading to Google Drive...';
           videoProgressFill.style.width = '60%';
 
-          const fileData = e.target.result.split(',')[1]; // Remove data:video/mp4;base64, prefix
+          const fileData = e.target.result; // Keep full data URL format
 
           const response = await chrome.runtime.sendMessage({
             action: 'googleDriveUpload',

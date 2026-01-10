@@ -421,7 +421,7 @@ async function handleGoogleDriveUpload(fileData, fileName, sessionId) {
       body: JSON.stringify({
         sessionId: sessionId,
         fileData: fileData,
-        fileName: fileName
+        filename: fileName
       })
     });
 
