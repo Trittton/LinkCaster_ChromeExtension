@@ -77,6 +77,12 @@ function switchTab(tabName) {
     content.classList.toggle('active', content.id === `tab-${tabName}`);
   });
 
+  // Update Google Drive status when switching to Convert tab
+  if (tabName === 'convert') {
+    updateConvertGDriveStatus();
+    updateApiUI(); // Also update the API UI to show/hide Google Drive connection
+  }
+
   // Save current tab
   chrome.storage.local.set({ currentTab: tabName });
 }
@@ -122,6 +128,17 @@ chrome.storage.local.get(['inputText', 'outputText', 'outputVisible', 'theme', '
 // Auto-save input text
 inputText.addEventListener('input', () => {
   chrome.storage.local.set({ inputText: inputText.value });
+});
+
+// Listen for Google Drive connection changes from other tabs/windows
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName === 'local' && (changes.googleDriveConnected || changes.googleDriveSessionId)) {
+    // Update all Google Drive status displays
+    updateConvertGDriveStatus();
+    updateImageGDriveStatus();
+    updateGDriveStatus();
+    updateGDriveUI();
+  }
 });
 
 // Event listeners
@@ -1702,3 +1719,11 @@ if (clearImageHistory) {
     showStatus('History cleared', 'success');
   });
 }
+
+// Initialize Google Drive status on page load
+(async function initializeGoogleDriveStatus() {
+  await updateConvertGDriveStatus();
+  await updateImageGDriveStatus();
+  await updateGDriveStatus();
+  await updateGDriveUI();
+})();
