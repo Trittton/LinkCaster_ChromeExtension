@@ -9,13 +9,21 @@
 <body data-theme="dark">
   <div class="container">
     <div class="header">
-      <h1>Link Converter</h1>
+      <h1>LinkCaster</h1>
       <button id="theme-toggle" class="icon-btn" title="Toggle theme">
         <span class="theme-icon">☀️</span>
       </button>
     </div>
 
-    <div class="settings">
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="convert">Convert</button>
+      <button class="tab-btn" data-tab="upload-img">Upload Img</button>
+      <button class="tab-btn" data-tab="upload-vid">Upload Vid</button>
+    </div>
+
+    <!-- Convert Tab -->
+    <div id="tab-convert" class="tab-content active">
+      <div class="settings">
       <div class="settings-header">
         <label for="host-select">Upload Service</label>
         <button id="settings-toggle" class="icon-btn small" title="API Settings" style="display: none;">
@@ -70,6 +78,23 @@
       <label for="output-text">Converted Links</label>
       <textarea id="output-text" rows="6" readonly></textarea>
       <button id="copy-btn" class="primary">Copy to Clipboard</button>
+    </div>
+    </div>
+
+    <!-- Upload Img Tab -->
+    <div id="tab-upload-img" class="tab-content">
+      <div class="tab-placeholder">
+        <p>Upload images from your computer</p>
+        <p style="font-size: 12px; color: var(--text-dimmed);">Coming soon...</p>
+      </div>
+    </div>
+
+    <!-- Upload Vid Tab -->
+    <div id="tab-upload-vid" class="tab-content">
+      <div class="tab-placeholder">
+        <p>Upload videos to Google Drive</p>
+        <p style="font-size: 12px; color: var(--text-dimmed);">Coming soon...</p>
+      </div>
     </div>
   </div>
 

@@ -1,4 +1,8 @@
-// DOM Elements
+// DOM Elements - Tabs
+const tabButtons = document.querySelectorAll('.tab-btn');
+const tabContents = document.querySelectorAll('.tab-content');
+
+// DOM Elements - Convert Tab
 const inputText = document.getElementById('input-text');
 const outputText = document.getElementById('output-text');
 const replaceBtn = document.getElementById('replace-btn');
@@ -53,9 +57,40 @@ const SERVICE_INFO = {
 // State
 let apiSettingsExpanded = false;
 let lastApiError = null;
+let currentTab = 'convert';
+
+// Tab switching function
+function switchTab(tabName) {
+  currentTab = tabName;
+
+  // Update tab buttons
+  tabButtons.forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.tab === tabName);
+  });
+
+  // Update tab content visibility
+  tabContents.forEach(content => {
+    content.classList.toggle('active', content.id === `tab-${tabName}`);
+  });
+
+  // Save current tab
+  chrome.storage.local.set({ currentTab: tabName });
+}
+
+// Tab button event listeners
+tabButtons.forEach(btn => {
+  btn.addEventListener('click', () => {
+    switchTab(btn.dataset.tab);
+  });
+});
 
 // Load saved state and settings
-chrome.storage.local.get(['inputText', 'outputText', 'outputVisible', 'theme'], (localData) => {
+chrome.storage.local.get(['inputText', 'outputText', 'outputVisible', 'theme', 'currentTab'], (localData) => {
+  // Restore last active tab
+  if (localData.currentTab) {
+    switchTab(localData.currentTab);
+  }
+
   // Restore persisted text
   if (localData.inputText) inputText.value = localData.inputText;
   if (localData.outputText) outputText.value = localData.outputText;
