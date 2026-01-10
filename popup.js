@@ -1210,6 +1210,10 @@ if (clearVideoHistory) {
 const imageSettingsBtn = document.getElementById('image-settings-btn');
 const imageSettingsPanel = document.getElementById('image-settings-panel');
 const imageServiceSelect = document.getElementById('image-service-select');
+const imageGdriveConnection = document.getElementById('image-gdrive-connection');
+const imageGdriveConnect = document.getElementById('image-gdrive-connect');
+const imageGdriveUnlink = document.getElementById('image-gdrive-unlink');
+const imageGdriveStatus = document.getElementById('image-gdrive-status');
 const imageHistoryBtn = document.getElementById('image-history-btn');
 const imageHistoryPanel = document.getElementById('image-history-panel');
 const imageHistoryList = document.getElementById('image-history-list');
@@ -1227,13 +1231,110 @@ const imageCopyBtn = document.getElementById('image-copy-btn');
 chrome.storage.local.get(['imageUploadService'], (result) => {
   if (result.imageUploadService && imageServiceSelect) {
     imageServiceSelect.value = result.imageUploadService;
+    updateImageGDriveUI();
   }
 });
 
-// Save service selection
+// Save service selection and update UI
 if (imageServiceSelect) {
   imageServiceSelect.addEventListener('change', () => {
     chrome.storage.local.set({ imageUploadService: imageServiceSelect.value });
+    updateImageGDriveUI();
+  });
+}
+
+// Update Google Drive UI visibility based on selected service
+async function updateImageGDriveUI() {
+  const service = imageServiceSelect ? imageServiceSelect.value : 'catbox';
+
+  if (imageGdriveConnection) {
+    imageGdriveConnection.style.display = service === 'gdrive' ? 'block' : 'none';
+  }
+
+  if (service === 'gdrive') {
+    await updateImageGDriveStatus();
+  }
+}
+
+// Update Google Drive connection status for images
+async function updateImageGDriveStatus() {
+  if (!imageGdriveStatus) return;
+
+  const data = await chrome.storage.local.get(['googleDriveSessionId', 'googleDriveConnected']);
+  const isConnected = data.googleDriveSessionId && data.googleDriveConnected;
+
+  if (isConnected) {
+    imageGdriveStatus.textContent = '✓ Connected';
+    imageGdriveStatus.style.color = '#38ef7d';
+    if (imageGdriveConnect) {
+      imageGdriveConnect.textContent = 'Reconnect';
+      imageGdriveConnect.classList.remove('primary');
+      imageGdriveConnect.classList.add('secondary');
+    }
+    if (imageGdriveUnlink) {
+      imageGdriveUnlink.style.display = 'inline-block';
+    }
+  } else {
+    imageGdriveStatus.textContent = 'Not connected';
+    imageGdriveStatus.style.color = 'var(--text-dimmed)';
+    if (imageGdriveConnect) {
+      imageGdriveConnect.textContent = 'Connect to Google Drive';
+      imageGdriveConnect.classList.remove('secondary');
+      imageGdriveConnect.classList.add('primary');
+    }
+    if (imageGdriveUnlink) {
+      imageGdriveUnlink.style.display = 'none';
+    }
+  }
+}
+
+// Google Drive connect button for images
+async function handleImageGDriveConnect() {
+  if (!imageGdriveConnect) return;
+
+  imageGdriveConnect.disabled = true;
+  const originalText = imageGdriveConnect.textContent;
+  imageGdriveConnect.textContent = 'Connecting...';
+
+  try {
+    const response = await chrome.runtime.sendMessage({ action: 'googleDriveOAuth' });
+
+    if (response.success) {
+      showStatus('Connected to Google Drive!', 'success');
+      await updateImageGDriveStatus();
+    } else {
+      showStatus('Failed to connect: ' + response.error, 'error');
+    }
+  } catch (error) {
+    showStatus('Error: ' + error.message, 'error');
+  } finally {
+    imageGdriveConnect.disabled = false;
+    imageGdriveConnect.textContent = originalText;
+  }
+}
+
+if (imageGdriveConnect) {
+  imageGdriveConnect.addEventListener('click', handleImageGDriveConnect);
+}
+
+// Unlink button for images
+if (imageGdriveUnlink) {
+  imageGdriveUnlink.addEventListener('click', async () => {
+    const confirmed = confirm('Unlink Google Drive account? You will need to reconnect to upload to Google Drive.');
+
+    if (!confirmed) return;
+
+    imageGdriveUnlink.disabled = true;
+
+    await chrome.storage.local.set({
+      googleDriveSessionId: null,
+      googleDriveConnected: false
+    });
+
+    showStatus('Google Drive unlinked', 'success');
+    await updateImageGDriveStatus();
+
+    imageGdriveUnlink.disabled = false;
   });
 }
 
@@ -1294,6 +1395,15 @@ if (uploadImagesBtn) {
       return;
     }
 
+    if (service === 'gdrive') {
+      // Check if connected to Google Drive
+      const data = await chrome.storage.local.get(['googleDriveSessionId', 'googleDriveConnected']);
+      if (!data.googleDriveSessionId || !data.googleDriveConnected) {
+        showStatus('Please connect to Google Drive first', 'error');
+        return;
+      }
+    }
+
     uploadImagesBtn.disabled = true;
     imageProgress.style.display = 'block';
     imageProgressText.textContent = `Uploading 0/${files.length} images...`;
@@ -1305,7 +1415,40 @@ if (uploadImagesBtn) {
     try {
       for (const file of files) {
         try {
-          const url = await uploadToCatbox(file);
+          let url;
+          if (service === 'gdrive') {
+            // Upload to Google Drive
+            const data = await chrome.storage.local.get(['googleDriveSessionId']);
+            const reader = new FileReader();
+
+            url = await new Promise((resolve, reject) => {
+              reader.onload = async (e) => {
+                try {
+                  const fileData = e.target.result;
+                  const response = await chrome.runtime.sendMessage({
+                    action: 'googleDriveUpload',
+                    fileData: fileData,
+                    fileName: file.name,
+                    sessionId: data.googleDriveSessionId
+                  });
+
+                  if (response.success) {
+                    resolve(response.url);
+                  } else {
+                    reject(new Error(response.error));
+                  }
+                } catch (error) {
+                  reject(error);
+                }
+              };
+              reader.onerror = () => reject(new Error('Failed to read file'));
+              reader.readAsDataURL(file);
+            });
+          } else {
+            // Upload to Catbox
+            url = await uploadToCatbox(file);
+          }
+
           urls.push(url);
 
           // Add to history

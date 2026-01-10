@@ -102,7 +102,18 @@
           <select id="image-service-select" style="width: 100%; margin-top: 8px;">
             <option value="catbox">Catbox.moe</option>
             <option value="imgur">Imgur (requires API key)</option>
+            <option value="gdrive">Google Drive</option>
           </select>
+
+          <!-- Google Drive Connection (shown when Google Drive selected) -->
+          <div id="image-gdrive-connection" style="display: none; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-color);">
+            <label>Google Drive Connection</label>
+            <div class="button-group" style="margin-top: 8px;">
+              <button id="image-gdrive-connect" class="primary">Connect to Google Drive</button>
+              <button id="image-gdrive-unlink" class="secondary" style="display: none;">Unlink</button>
+            </div>
+            <small id="image-gdrive-status" style="display: block; color: var(--text-dimmed); font-size: 11px; text-align: center; margin-top: 6px;"></small>
+          </div>
         </div>
 
         <!-- History Panel -->
