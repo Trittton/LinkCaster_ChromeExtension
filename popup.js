@@ -28,6 +28,8 @@ const progressFill = document.getElementById('progress-fill');
 const progressText = document.getElementById('progress-text');
 const outputSection = document.getElementById('output-section');
 const statusDiv = document.getElementById('status');
+const imageStatusDiv = document.getElementById('image-status');
+const videoStatusDiv = document.getElementById('video-status');
 const convertGdriveConnection = document.getElementById('convert-gdrive-connection');
 const convertGdriveConnect = document.getElementById('convert-gdrive-connect');
 const convertGdriveUnlink = document.getElementById('convert-gdrive-unlink');
@@ -391,14 +393,24 @@ async function authenticateFlickr() {
 }
 
 function showStatus(message, type) {
-  statusDiv.textContent = message;
-  statusDiv.className = `status ${type}`;
-  statusDiv.style.display = 'block'; // Ensure it's visible
+  // Show status in the currently active tab
+  let activeStatusDiv = statusDiv; // Default to Convert tab status
+
+  // Check which tab is active and use its status div
+  if (currentTab === 'upload-img' && imageStatusDiv) {
+    activeStatusDiv = imageStatusDiv;
+  } else if (currentTab === 'upload-vid' && videoStatusDiv) {
+    activeStatusDiv = videoStatusDiv;
+  }
+
+  activeStatusDiv.textContent = message;
+  activeStatusDiv.className = `status ${type}`;
+  activeStatusDiv.style.display = 'block'; // Ensure it's visible
 
   // For error messages, show longer (8 seconds instead of 5)
   const timeout = type === 'error' ? 8000 : 5000;
   setTimeout(() => {
-    statusDiv.style.display = 'none';
+    activeStatusDiv.style.display = 'none';
   }, timeout);
 }
 
