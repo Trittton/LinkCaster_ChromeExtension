@@ -748,24 +748,6 @@ textarea::-webkit-scrollbar-thumb:hover {
   padding: 4px 10px;
 }
 
-#video-history-list::-webkit-scrollbar {
-  width: 8px;
-}
-
-#video-history-list::-webkit-scrollbar-track {
-  background: var(--bg-tertiary);
-  border-radius: 10px;
-}
-
-#video-history-list::-webkit-scrollbar-thumb {
-  background: var(--border-color);
-  border-radius: 10px;
-}
-
-#video-history-list::-webkit-scrollbar-thumb:hover {
-  background: var(--text-dimmed);
-}
-
 /* Upload Img Section */
 .upload-section {
   padding: 12px 0;
@@ -815,4 +797,171 @@ textarea::-webkit-scrollbar-thumb:hover {
 
 #image-file-input::-webkit-file-upload-button:hover {
   background: var(--bg-tertiary);
+}
+
+/* Detected Files Section */
+.detected-files-container {
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 8px;
+  background: var(--bg-tertiary);
+  transition: all 0.2s;
+}
+
+.detected-files-container:hover {
+  border-color: #667eea;
+}
+
+/* Custom Scrollbar for Detected Files and History */
+#image-file-list::-webkit-scrollbar,
+#video-file-list::-webkit-scrollbar,
+#image-history-list::-webkit-scrollbar,
+#video-history-list::-webkit-scrollbar,
+#convert-history-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+#image-file-list::-webkit-scrollbar-track,
+#video-file-list::-webkit-scrollbar-track,
+#image-history-list::-webkit-scrollbar-track,
+#video-history-list::-webkit-scrollbar-track,
+#convert-history-list::-webkit-scrollbar-track {
+  background: var(--bg-tertiary);
+  border-radius: 10px;
+  margin: 4px 0;
+}
+
+#image-file-list::-webkit-scrollbar-thumb,
+#video-file-list::-webkit-scrollbar-thumb,
+#image-history-list::-webkit-scrollbar-thumb,
+#video-history-list::-webkit-scrollbar-thumb,
+#convert-history-list::-webkit-scrollbar-thumb {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 10px;
+  border: 2px solid var(--bg-tertiary);
+  transition: all 0.2s;
+}
+
+#image-file-list::-webkit-scrollbar-thumb:hover,
+#video-file-list::-webkit-scrollbar-thumb:hover,
+#image-history-list::-webkit-scrollbar-thumb:hover,
+#video-history-list::-webkit-scrollbar-thumb:hover,
+#convert-history-list::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+  border-width: 1px;
+}
+
+/* Time Filter Number Input Styling */
+#image-time-filter,
+#video-time-filter {
+  padding: 8px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  font-size: 13px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  transition: all 0.2s;
+  font-weight: 600;
+  text-align: center;
+  -moz-appearance: textfield; /* Firefox */
+}
+
+/* Hide number input spinners */
+#image-time-filter::-webkit-outer-spin-button,
+#image-time-filter::-webkit-inner-spin-button,
+#video-time-filter::-webkit-outer-spin-button,
+#video-time-filter::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+#image-time-filter:hover,
+#video-time-filter:hover {
+  border-color: #667eea;
+  background-color: var(--input-focus-bg);
+  cursor: pointer;
+}
+
+#image-time-filter:focus,
+#video-time-filter:focus {
+  outline: none;
+  border-color: #667eea;
+  background-color: var(--input-focus-bg);
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+/* File Item Styling */
+.file-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px;
+  margin-bottom: 6px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  transition: all 0.2s;
+}
+
+.file-item:hover {
+  background: var(--bg-primary);
+  border-color: #667eea;
+  transform: translateX(2px);
+}
+
+.file-item.uploaded {
+  opacity: 0.7;
+  background: var(--bg-tertiary);
+}
+
+.file-checkbox {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  accent-color: #667eea;
+}
+
+.file-checkbox:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* Folder Selection Section */
+.folder-select-section {
+  margin-bottom: 12px;
+}
+
+.folder-select-section label {
+  display: block;
+  margin-bottom: 6px;
+  font-weight: 500;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.folder-select-section button {
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+#image-folder-path,
+#video-folder-path {
+  font-size: 11px;
+  color: var(--text-dimmed);
+  padding: 6px 10px;
+  background: var(--bg-tertiary);
+  border-radius: 6px;
+  border: 1px solid var(--border-light);
+  word-break: break-all;
+  transition: all 0.2s;
+}
+
+#image-folder-path:not(:empty),
+#video-folder-path:not(:empty) {
+  border-color: #38ef7d;
+  background: rgba(56, 239, 125, 0.05);
 }

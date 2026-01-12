@@ -6,7 +6,7 @@
 
 import { initTheme } from './modules/theme.js';
 import { initTabs, getCurrentTab } from './modules/tabs.js';
-import { initConvertTab, updateApiUI } from './modules/convertTab.js';
+import { initConvertTab, updateApiUI, updateConvertGDriveStatus } from './modules/convertTab.js';
 import { initUploadImageTab, updateImageGDriveStatus } from './modules/uploadImageTab.js';
 import { initUploadVideoTab, updateGDriveUI, updateGDriveStatus } from './modules/uploadVideoTab.js';
 import { logInfo, logErrorMessage } from './modules/errorLogger.js';
@@ -17,6 +17,8 @@ import { logInfo, logErrorMessage } from './modules/errorLogger.js';
  */
 function getConvertTabElements() {
   return {
+    convertSettingsBtn: document.getElementById('convert-settings-btn'),
+    convertSettingsPanel: document.getElementById('convert-settings-panel'),
     inputText: document.getElementById('input-text'),
     outputText: document.getElementById('output-text'),
     replaceBtn: document.getElementById('replace-btn'),
@@ -44,7 +46,11 @@ function getConvertTabElements() {
     convertGdriveConnection: document.getElementById('convert-gdrive-connection'),
     convertGdriveConnect: document.getElementById('convert-gdrive-connect'),
     convertGdriveUnlink: document.getElementById('convert-gdrive-unlink'),
-    convertGdriveStatus: document.getElementById('convert-gdrive-status')
+    convertGdriveStatus: document.getElementById('convert-gdrive-status'),
+    convertHistoryBtn: document.getElementById('convert-history-btn'),
+    convertHistoryPanel: document.getElementById('convert-history-panel'),
+    convertHistoryList: document.getElementById('convert-history-list'),
+    clearConvertHistory: document.getElementById('clear-convert-history')
   };
 }
 
@@ -62,7 +68,7 @@ async function handleStorageChange(changes, areaName) {
         // Update Convert tab GDrive status
         const convertElements = getConvertTabElements();
         if (convertElements.convertGdriveStatus) {
-          // Convert tab will handle its own status update via its module
+          await updateConvertGDriveStatus(convertElements);
         }
 
         // Update Upload Image tab GDrive status
@@ -76,18 +82,14 @@ async function handleStorageChange(changes, areaName) {
           await updateImageGDriveStatus(imageElements);
         }
 
-        // Update Upload Video tab GDrive UI
+        // Update Upload Video tab GDrive status
         const videoElements = {
-          firstTimePrompt: document.getElementById('gdrive-first-time'),
           uploadSection: document.getElementById('gdrive-upload-section'),
-          gdriveConnect: document.getElementById('gdrive-connect'),
-          gdriveUnlink: document.getElementById('gdrive-unlink'),
-          gdriveStatus: document.getElementById('gdrive-status'),
-          gdriveConnectFirst: document.getElementById('gdrive-connect-first'),
-          settingsPanel: document.getElementById('gdrive-settings')
+          gdriveConnect: document.getElementById('video-gdrive-connect'),
+          gdriveUnlink: document.getElementById('video-gdrive-unlink'),
+          gdriveStatus: document.getElementById('video-gdrive-status')
         };
         if (videoElements.gdriveStatus) {
-          await updateGDriveUI(videoElements);
           await updateGDriveStatus(videoElements);
         }
 

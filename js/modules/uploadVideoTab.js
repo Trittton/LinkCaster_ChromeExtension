@@ -12,6 +12,14 @@ import { scanFolder, requestFolderPermission, checkFolderPermission } from './fi
 import { uploadToGoogleDrive } from './uploadServices.js';
 
 /**
+ * Gets the status element for this tab
+ * @returns {HTMLElement|null}
+ */
+function getStatusElement() {
+  return document.getElementById('video-status');
+}
+
+/**
  * Folder handle for video monitoring
  * @type {FileSystemDirectoryHandle|null}
  */
@@ -31,16 +39,51 @@ let detectedVideoFiles = new Map();
 
 /**
  * Initializes the Upload Video tab
- * @param {Object} elements - DOM elements for the tab
  * @returns {Promise<void>}
  */
-export async function initUploadVideoTab(elements) {
+export async function initUploadVideoTab() {
+  const elements = getElements();
   await loadSettings(elements);
   await loadFolderHandle();
   await loadUploadedFiles();
   await renderVideoHistory(elements);
   await updateGDriveUI(elements);
   setupEventListeners(elements);
+
+  // Restore folder path if folder was previously selected
+  if (videoFolderHandle) {
+    elements.folderPath.textContent = `Selected: ${videoFolderHandle.name}`;
+    elements.folderPath.style.color = '#38ef7d';
+
+    // Load previously detected files from storage
+    const data = await getStorage(['detectedVideoFiles']);
+    if (data.detectedVideoFiles && Array.isArray(data.detectedVideoFiles) && data.detectedVideoFiles.length > 0) {
+      // Restore detected files map (without File objects, so they can't be uploaded until refresh)
+      detectedVideoFiles.clear();
+      data.detectedVideoFiles.forEach(fileInfo => {
+        detectedVideoFiles.set(fileInfo.name, fileInfo);
+      });
+
+      // Get upload history to find URLs for uploaded files
+      const history = await getHistory('videoUploadHistory');
+      const urlMap = new Map();
+      history.forEach(item => {
+        urlMap.set(item.fileName, item.url);
+      });
+
+      // Render the files with upload status and URLs
+      const filesWithStatus = data.detectedVideoFiles.map(f => ({
+        ...f,
+        uploaded: uploadedVideoFiles.has(f.name),
+        url: urlMap.get(f.name)
+      }));
+      const html = filesWithStatus.map(f => createFileItemHtml(f)).join('');
+      elements.fileList.innerHTML = html;
+    } else {
+      // No saved files, show empty message
+      elements.fileList.innerHTML = '<p style="text-align: center; color: var(--text-dimmed); font-size: 12px; padding: 20px;">No files detected. Click "Refresh" to scan folder.</p>';
+    }
+  }
 
   await logInfo('Upload Video tab initialized');
 }
@@ -113,8 +156,18 @@ function setupEventListeners(elements) {
     elements.clearHistoryBtn.addEventListener('click', async () => {
       await clearHistory('videoUploadHistory');
       await renderVideoHistory(elements);
-      showStatus('History cleared', StatusType.SUCCESS);
+      showStatus('History cleared', StatusType.SUCCESS, getStatusElement());
     });
+  }
+
+  // Google Drive connect
+  if (elements.gdriveConnect) {
+    elements.gdriveConnect.addEventListener('click', () => handleGDriveConnect(elements));
+  }
+
+  // Google Drive unlink
+  if (elements.gdriveUnlink) {
+    elements.gdriveUnlink.addEventListener('click', () => handleGDriveUnlink(elements));
   }
 
   // Select folder
@@ -131,14 +184,14 @@ function setupEventListeners(elements) {
           try {
             await requestFolderPermission(videoFolderHandle);
           } catch (error) {
-            showStatus('Permission denied. Please select folder again.', StatusType.ERROR);
+            showStatus('Permission denied. Please select folder again.', StatusType.ERROR, getStatusElement());
             return;
           }
         }
       }
 
       await updateVideoFiles(elements);
-      showStatus('Files refreshed', StatusType.SUCCESS);
+      showStatus('Files refreshed', StatusType.SUCCESS, getStatusElement());
     });
   }
 
@@ -160,28 +213,14 @@ function setupEventListeners(elements) {
     elements.copyBtn.addEventListener('click', async () => {
       try {
         await navigator.clipboard.writeText(elements.outputText.value);
-        showStatus('Copied to clipboard!', StatusType.SUCCESS);
+        showStatus('Copied to clipboard!', StatusType.SUCCESS, getStatusElement());
       } catch (error) {
-        showStatus('Failed to copy', StatusType.ERROR);
+        showStatus('Failed to copy', StatusType.ERROR, getStatusElement());
         await logErrorMessage('Failed to copy video link', error);
       }
     });
   }
 
-  // Google Drive connect
-  if (elements.gdriveConnect) {
-    elements.gdriveConnect.addEventListener('click', handleGDriveConnect);
-  }
-
-  // Google Drive unlink
-  if (elements.gdriveUnlink) {
-    elements.gdriveUnlink.addEventListener('click', handleGDriveUnlink);
-  }
-
-  // First-time connect button
-  if (elements.gdriveConnectFirst) {
-    elements.gdriveConnectFirst.addEventListener('click', handleGDriveConnect);
-  }
 }
 
 /**
@@ -201,7 +240,7 @@ async function handleSelectFolder() {
     await updateVideoFiles(elements);
   } catch (error) {
     if (error.name !== 'AbortError') {
-      showStatus('Failed to select folder: ' + error.message, StatusType.ERROR);
+      showStatus('Failed to select folder: ' + error.message, StatusType.ERROR, getStatusElement());
       await logErrorMessage('Failed to select video folder', error);
     }
   }
@@ -223,14 +262,36 @@ async function updateVideoFiles(elements) {
     detectedVideoFiles.set(fileInfo.name, fileInfo);
   });
 
+  // Save detected files to storage (without the File objects, just metadata)
+  const filesToSave = files.map(f => ({
+    name: f.name,
+    size: f.size,
+    lastModified: f.lastModified,
+    type: f.type
+  }));
+  await setStorage({ detectedVideoFiles: filesToSave });
+
   if (files.length === 0) {
-    elements.detectedFiles.style.display = 'none';
+    elements.fileList.innerHTML = '<p style="text-align: center; color: var(--text-dimmed); font-size: 12px; padding: 20px;">No files detected in selected folder</p>';
     return;
   }
 
-  const html = files.map(f => createFileItemHtml(f)).join('');
+  // Get upload history to find URLs for uploaded files
+  const history = await getHistory('videoUploadHistory');
+  const urlMap = new Map();
+  history.forEach(item => {
+    urlMap.set(item.fileName, item.url);
+  });
+
+  // Mark files as uploaded if they were previously uploaded
+  const filesWithUploadStatus = files.map(f => ({
+    ...f,
+    uploaded: uploadedVideoFiles.has(f.name),
+    url: urlMap.get(f.name)
+  }));
+
+  const html = filesWithUploadStatus.map(f => createFileItemHtml(f)).join('');
   elements.fileList.innerHTML = html;
-  elements.detectedFiles.style.display = 'block';
 }
 
 /**
@@ -243,62 +304,133 @@ async function handleUploadVideo(elements) {
 
   // Add file from file input
   if (elements.fileInput.files && elements.fileInput.files.length > 0) {
-    filesToUpload.push(elements.fileInput.files[0]); // Only one video at a time
+    filesToUpload.push(elements.fileInput.files[0]);
   }
 
-  // Add checked file from detected files (only one)
-  const checkbox = elements.fileList.querySelector('.file-checkbox:checked:not(:disabled)');
-  if (checkbox) {
-    const filename = checkbox.dataset.filename;
-    const fileInfo = detectedVideoFiles.get(filename);
-    if (fileInfo && fileInfo.file) {
-      filesToUpload.push(fileInfo.file);
+  // Add ALL checked files from detected files
+  const checkboxes = elements.fileList.querySelectorAll('.file-checkbox:checked:not(:disabled)');
+
+  // If there are checked files, ensure they have File objects
+  if (checkboxes.length > 0 && videoFolderHandle) {
+    const checkedFilenames = Array.from(checkboxes).map(cb => cb.dataset.filename);
+
+    // Check if we need to fetch File objects
+    const needsFetch = checkedFilenames.some(filename => {
+      const fileInfo = detectedVideoFiles.get(filename);
+      return fileInfo && !fileInfo.file;
+    });
+
+    if (needsFetch) {
+      try {
+        // Request permission if needed
+        const hasPermission = await checkFolderPermission(videoFolderHandle);
+        if (!hasPermission) {
+          await requestFolderPermission(videoFolderHandle);
+        }
+
+        // Scan folder to get File objects with large time filter
+        const timeFilter = parseInt(elements.timeFilter.value) || 1440;
+        const files = await scanFolder(videoFolderHandle, 'video', timeFilter, new Set());
+
+        // Update detected files with File objects
+        files.forEach(scannedFileInfo => {
+          if (detectedVideoFiles.has(scannedFileInfo.name)) {
+            detectedVideoFiles.set(scannedFileInfo.name, scannedFileInfo);
+          }
+        });
+      } catch (error) {
+        showStatus('Failed to access folder. Please refresh the file list.', StatusType.ERROR, getStatusElement());
+        await logErrorMessage('Failed to fetch File objects for upload', error);
+        return;
+      }
+    }
+
+    // Add all checked files to upload list
+    for (const filename of checkedFilenames) {
+      const fileInfo = detectedVideoFiles.get(filename);
+      if (fileInfo && fileInfo.file) {
+        filesToUpload.push(fileInfo.file);
+      }
     }
   }
 
   if (filesToUpload.length === 0) {
-    showStatus('Please select a video file', StatusType.ERROR);
+    showStatus('Please select at least one video file', StatusType.ERROR, getStatusElement());
     return;
   }
 
   // Check Google Drive connection
   const data = await getStorage(['googleDriveSessionId', 'googleDriveConnected']);
   if (!data.googleDriveSessionId || !data.googleDriveConnected) {
-    showStatus('Please connect to Google Drive first', StatusType.ERROR);
+    showStatus('Please connect to Google Drive first', StatusType.ERROR, getStatusElement());
     return;
   }
 
-  const file = filesToUpload[0];
-
-  // Validate file
-  const validation = validateVideoFile(file);
-  if (!validation.valid) {
-    showStatus(validation.error, StatusType.ERROR);
-    await logWarning('Video validation failed', { file: file.name, error: validation.error });
-    return;
+  // Validate all files first
+  for (const file of filesToUpload) {
+    const validation = validateVideoFile(file);
+    if (!validation.valid) {
+      showStatus(`${file.name}: ${validation.error}`, StatusType.ERROR, getStatusElement());
+      await logWarning('Video validation failed', { file: file.name, error: validation.error });
+      return;
+    }
   }
 
   // Start upload
   elements.uploadBtn.disabled = true;
   elements.progress.style.display = 'block';
-  updateProgress(0, 1, 'Uploading video...', elements.progressFill, elements.progressText);
+
+  const uploadedUrls = [];
+  let successCount = 0;
+  let failedCount = 0;
 
   try {
-    const url = await uploadToGoogleDrive(file, data.googleDriveSessionId);
+    for (let i = 0; i < filesToUpload.length; i++) {
+      const file = filesToUpload[i];
+      const currentIndex = i + 1;
+      const total = filesToUpload.length;
 
-    elements.outputText.value = url;
-    elements.outputSection.style.display = 'block';
+      updateProgress(i, total, `Uploading ${currentIndex}/${total}: ${file.name}...`, elements.progressFill, elements.progressText);
 
-    // Mark file as uploaded
-    uploadedVideoFiles.add(file.name);
+      try {
+        const url = await uploadToGoogleDrive(file, data.googleDriveSessionId);
+        uploadedUrls.push(url);
+        successCount++;
+
+        // Mark file as uploaded
+        uploadedVideoFiles.add(file.name);
+
+        // Add to history
+        await addToHistory('videoUploadHistory', {
+          fileName: file.name,
+          url: url,
+          timestamp: Date.now()
+        });
+
+        await logInfo('Video upload completed', { file: file.name });
+      } catch (error) {
+        failedCount++;
+        await logErrorMessage(`Video upload failed for ${file.name}`, error);
+
+        // Check for session expiry
+        if (error.message === 'GOOGLE_DRIVE_SESSION_EXPIRED') {
+          await setStorage({ googleDriveConnected: false });
+          await updateGDriveUI(elements);
+          showStatus('⚠️ Google Drive session expired. Please reconnect.', StatusType.ERROR, getStatusElement());
+          alert('⚠️ Google Drive session expired!\n\nPlease reconnect to Google Drive in Settings (⚙️) to continue uploading.');
+          break; // Stop uploading remaining files
+        }
+      }
+    }
+
+    // Save uploaded files list
     await setStorage({ uploadedVideoFiles: Array.from(uploadedVideoFiles) });
 
-    // Add to history
-    await addToHistory('videoUploadHistory', {
-      fileName: file.name,
-      url: url,
-      timestamp: Date.now()
-    });
+    // Show results
+    if (uploadedUrls.length > 0) {
+      elements.outputText.value = uploadedUrls.join('\n');
+      elements.outputSection.style.display = 'block';
+    }
 
     // Refresh list
     if (videoFolderHandle) {
@@ -310,26 +442,24 @@ async function handleUploadVideo(elements) {
       elements.fileInput.value = '';
     }
 
-    updateProgress(1, 1, 'Upload complete!', elements.progressFill, elements.progressText);
-    showStatus('Video uploaded successfully!', StatusType.SUCCESS);
+    // Show summary
+    updateProgress(filesToUpload.length, filesToUpload.length, 'Upload complete!', elements.progressFill, elements.progressText);
+
+    if (failedCount === 0) {
+      showStatus(`All ${successCount} video(s) uploaded successfully!`, StatusType.SUCCESS, getStatusElement());
+    } else if (successCount === 0) {
+      showStatus(`All ${failedCount} upload(s) failed`, StatusType.ERROR, getStatusElement());
+    } else {
+      showStatus(`${successCount} uploaded, ${failedCount} failed`, StatusType.WARNING, getStatusElement());
+    }
 
     setTimeout(() => {
       elements.progress.style.display = 'none';
-    }, 2000);
+    }, 3000);
 
-    await logInfo('Video upload completed', { file: file.name });
   } catch (error) {
-    // Check for session expiry
-    if (error.message === 'GOOGLE_DRIVE_SESSION_EXPIRED') {
-      await setStorage({ googleDriveConnected: false });
-      await updateGDriveUI(elements);
-      showStatus('⚠️ Google Drive session expired. Please reconnect.', StatusType.ERROR);
-      alert('⚠️ Google Drive session expired!\n\nPlease reconnect to Google Drive in Settings (⚙️) to continue uploading.');
-    } else {
-      showStatus('Upload failed: ' + error.message, StatusType.ERROR);
-    }
-
-    await logErrorMessage('Video upload failed', error);
+    showStatus('Upload failed: ' + error.message, StatusType.ERROR, getStatusElement());
+    await logErrorMessage('Video upload error', error);
     elements.progress.style.display = 'none';
   } finally {
     elements.uploadBtn.disabled = false;
@@ -357,7 +487,7 @@ async function renderVideoHistory(elements) {
     btn.addEventListener('click', async (e) => {
       const url = e.target.closest('.history-item').dataset.url;
       await navigator.clipboard.writeText(url);
-      showStatus('Link copied!', StatusType.SUCCESS);
+      showStatus('Link copied!', StatusType.SUCCESS, getStatusElement());
     });
   });
 
@@ -371,82 +501,90 @@ async function renderVideoHistory(elements) {
 
 /**
  * Updates Google Drive UI visibility
- * @param {Object} elements - DOM elements
+ * @param {Object} [elements] - Optional DOM elements (will fetch if not provided)
  * @returns {Promise<void>}
  */
 export async function updateGDriveUI(elements) {
-  const data = await getStorage(['googleDriveConnected']);
-
-  if (data.googleDriveConnected) {
-    // Show upload section, hide first-time prompt
-    if (elements.firstTimePrompt) elements.firstTimePrompt.style.display = 'none';
-    if (elements.uploadSection) elements.uploadSection.style.display = 'block';
-    await updateGDriveStatus(elements);
-  } else {
-    // Show first-time prompt, hide upload section
-    if (elements.firstTimePrompt) elements.firstTimePrompt.style.display = 'block';
-    if (elements.uploadSection) elements.uploadSection.style.display = 'none';
+  if (!elements) {
+    elements = getElements();
   }
+
+  // Always show upload section (Google Drive connection managed in settings)
+  if (elements.uploadSection) {
+    elements.uploadSection.style.display = 'block';
+  }
+
+  // Update Google Drive status in settings
+  await updateGDriveStatus(elements);
 }
 
 /**
  * Updates Google Drive connection status
- * @param {Object} elements - DOM elements
+ * @param {Object} [elements] - Optional DOM elements (will fetch if not provided)
  * @returns {Promise<void>}
  */
 export async function updateGDriveStatus(elements) {
+  if (!elements) {
+    elements = getElements();
+  }
+
   const data = await getStorage(['googleDriveConnected', 'googleDriveConnectedAt']);
 
   if (data.googleDriveConnected) {
-    elements.gdriveConnect.style.display = 'none';
-    elements.gdriveUnlink.style.display = 'block';
-    elements.gdriveStatus.textContent = `Connected - ${formatDate(data.googleDriveConnectedAt)}`;
-    elements.gdriveStatus.style.color = '#38ef7d';
+    if (elements.gdriveConnect) elements.gdriveConnect.style.display = 'none';
+    if (elements.gdriveUnlink) elements.gdriveUnlink.style.display = 'block';
+    if (elements.gdriveStatus) {
+      const date = data.googleDriveConnectedAt ? new Date(data.googleDriveConnectedAt).toLocaleDateString() : 'Unknown';
+      elements.gdriveStatus.textContent = `Connected - ${date}`;
+      elements.gdriveStatus.style.color = '#38ef7d';
+    }
   } else {
-    elements.gdriveConnect.style.display = 'block';
-    elements.gdriveUnlink.style.display = 'none';
-    elements.gdriveStatus.textContent = 'Not connected';
-    elements.gdriveStatus.style.color = 'var(--text-dimmed)';
+    if (elements.gdriveConnect) elements.gdriveConnect.style.display = 'block';
+    if (elements.gdriveUnlink) elements.gdriveUnlink.style.display = 'none';
+    if (elements.gdriveStatus) {
+      elements.gdriveStatus.textContent = 'Not connected';
+      elements.gdriveStatus.style.color = 'var(--text-dimmed)';
+    }
   }
 }
 
 /**
  * Handles Google Drive connect
+ * @param {Object} elements - DOM elements
  * @returns {Promise<void>}
  */
-async function handleGDriveConnect() {
+async function handleGDriveConnect(elements) {
   try {
     const response = await chrome.runtime.sendMessage({ action: 'googleDriveOAuth' });
 
     if (response.success) {
-      showStatus('Connected to Google Drive!', StatusType.SUCCESS);
-      const elements = getElements();
-      await updateGDriveUI(elements);
+      showStatus('Connected to Google Drive!', StatusType.SUCCESS, getStatusElement());
+      await updateGDriveStatus(elements);
       await logInfo('Connected to Google Drive from Upload Video tab');
     } else {
-      showStatus('Failed to connect: ' + response.error, StatusType.ERROR);
+      showStatus('Failed to connect: ' + response.error, StatusType.ERROR, getStatusElement());
       await logErrorMessage('Google Drive connection failed', new Error(response.error));
     }
   } catch (error) {
-    showStatus('Connection failed: ' + error.message, StatusType.ERROR);
+    showStatus('Connection failed: ' + error.message, StatusType.ERROR, getStatusElement());
     await logErrorMessage('Google Drive connection error', error);
   }
 }
 
 /**
  * Handles Google Drive unlink
+ * @param {Object} elements - DOM elements
  * @returns {Promise<void>}
  */
-async function handleGDriveUnlink() {
+async function handleGDriveUnlink(elements) {
   await setStorage({
     googleDriveSessionId: null,
     googleDriveConnected: false
   });
 
-  showStatus('Disconnected from Google Drive', StatusType.SUCCESS);
-  const elements = getElements();
-  await updateGDriveUI(elements);
-  await logInfo('Disconnected from Google Drive');
+  showStatus('Disconnected from Google Drive', StatusType.SUCCESS, getStatusElement());
+  await updateGDriveStatus(elements);
+  await logInfo('Disconnected from Google Drive from Upload Video tab');
 }
 
 /**
@@ -461,6 +599,9 @@ function getElements() {
     historyPanel: document.getElementById('video-history-panel'),
     historyList: document.getElementById('video-history-list'),
     clearHistoryBtn: document.getElementById('clear-video-history'),
+    gdriveConnect: document.getElementById('video-gdrive-connect'),
+    gdriveUnlink: document.getElementById('video-gdrive-unlink'),
+    gdriveStatus: document.getElementById('video-gdrive-status'),
     selectFolder: document.getElementById('video-select-folder'),
     folderPath: document.getElementById('video-folder-path'),
     timeFilter: document.getElementById('video-time-filter'),
@@ -475,11 +616,6 @@ function getElements() {
     outputSection: document.getElementById('video-output-section'),
     outputText: document.getElementById('video-output-text'),
     copyBtn: document.getElementById('video-copy-btn'),
-    firstTimePrompt: document.getElementById('gdrive-first-time'),
-    uploadSection: document.getElementById('gdrive-upload-section'),
-    gdriveConnect: document.getElementById('gdrive-connect'),
-    gdriveUnlink: document.getElementById('gdrive-unlink'),
-    gdriveStatus: document.getElementById('gdrive-status'),
-    gdriveConnectFirst: document.getElementById('gdrive-connect-first')
+    uploadSection: document.getElementById('gdrive-upload-section')
   };
 }

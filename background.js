@@ -364,6 +364,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
   }
+
+  if (request.action === 'extractLightshotImage') {
+    extractLightshotImage(request.url)
+      .then(result => sendResponse(result))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
 });
 
 async function handleGoogleDriveOAuth() {
@@ -459,6 +466,146 @@ async function handleGoogleDriveUpload(fileData, fileName, sessionId) {
     return { success: true, url: result.url, fileId: result.fileId };
   } catch (error) {
     console.error('Google Drive upload error:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+// ===== Lightshot Image Extraction =====
+
+async function extractLightshotImage(url) {
+  try {
+    console.log('[Background] Extracting image from Lightshot URL:', url);
+
+    // APPROACH 1: Try using backend proxy service to get rendered HTML
+    try {
+      console.log('[Background] Attempting backend API extraction...');
+      const apiResponse = await fetch(`${BACKEND_URL}/api/extract-lightshot`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ url: url }),
+        signal: AbortSignal.timeout(10000) // 10 second timeout
+      });
+
+      if (apiResponse.ok) {
+        const data = await apiResponse.json();
+        if (data.success && data.imageUrl) {
+          console.log('[Background] Backend API extracted image URL:', data.imageUrl);
+          return { success: true, imageUrl: data.imageUrl };
+        }
+      }
+      console.log('[Background] Backend API extraction failed, trying direct fetch...');
+    } catch (apiError) {
+      console.log('[Background] Backend API not available:', apiError.message);
+    }
+
+    // APPROACH 2: Try fetching with realistic browser headers
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Referer': 'https://prnt.sc/',
+        'DNT': '1',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'same-origin',
+        'Cache-Control': 'max-age=0'
+      },
+      cache: 'no-cache',
+      credentials: 'omit'
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch Lightshot page: ${response.status}`);
+    }
+
+    const html = await response.text();
+    console.log('[Background] Received HTML, length:', html.length);
+
+    // Log the full HTML for analysis (first 3000 chars to see more)
+    console.log('[Background] HTML content (first 3000 chars):', html.substring(0, 3000));
+
+    // Try multiple extraction patterns - including JavaScript variables and embedded data
+    // Note: Lightshot uses both image.prntscr.com AND img.lightshot.app domains
+    const patterns = [
+      // Meta tags (most common - Lightshot puts image URLs in og:image and twitter:image)
+      /property=["']og:image["']\s+content=["']([^"']*(?:image\.prntscr\.com|img\.lightshot\.app)[^"']*)["']/i,
+      /content=["']([^"']*(?:image\.prntscr\.com|img\.lightshot\.app)[^"']*)["']\s+property=["']og:image["']/i,
+      /name=["']twitter:image:src["']\s+content=["']([^"']*(?:image\.prntscr\.com|img\.lightshot\.app)[^"']*)["']/i,
+      /content=["']([^"']*(?:image\.prntscr\.com|img\.lightshot\.app)[^"']*)["']\s+name=["']twitter:image["']/i,
+      // JavaScript variables that might contain the image URL
+      /var\s+\w+\s*=\s*["'](https?:\/\/(?:image\.prntscr\.com|img\.lightshot\.app)[^"']+)["']/i,
+      /const\s+\w+\s*=\s*["'](https?:\/\/(?:image\.prntscr\.com|img\.lightshot\.app)[^"']+)["']/i,
+      /let\s+\w+\s*=\s*["'](https?:\/\/(?:image\.prntscr\.com|img\.lightshot\.app)[^"']+)["']/i,
+      // Common JavaScript patterns
+      /imageUrl\s*[=:]\s*["'](https?:\/\/(?:image\.prntscr\.com|img\.lightshot\.app)[^"']+)["']/i,
+      /url\s*[=:]\s*["'](https?:\/\/(?:image\.prntscr\.com|img\.lightshot\.app)[^"']+)["']/i,
+      /src\s*[=:]\s*["'](https?:\/\/(?:image\.prntscr\.com|img\.lightshot\.app)[^"']+)["']/i,
+      // Direct image src
+      /src=["']([^"']*(?:image\.prntscr\.com|img\.lightshot\.app)[^"']*)["']/i,
+      /src=["']\/\/((?:image\.prntscr\.com|img\.lightshot\.app)[^"']*)["']/i,
+      // JSON data
+      /"url"\s*:\s*"(https?:\/\/(?:image\.prntscr\.com|img\.lightshot\.app)[^"]+)"/i,
+      /"image"\s*:\s*"(https?:\/\/(?:image\.prntscr\.com|img\.lightshot\.app)[^"]+)"/i,
+      // Data attributes
+      /data-[a-z-]*=["']([^"']*(?:image\.prntscr\.com|img\.lightshot\.app)[^"']*)["']/i,
+      // Any occurrence in quotes (various quote styles)
+      /["'](https?:\/\/(?:image\.prntscr\.com|img\.lightshot\.app)\/[^"']+)["']/i,
+      /`(https?:\/\/(?:image\.prntscr\.com|img\.lightshot\.app)\/[^`]+)`/i,
+      // Without protocol
+      /["']\/\/((?:image\.prntscr\.com|img\.lightshot\.app)\/[^"']+)["']/i,
+      // Any occurrence (last resort)
+      /https?:\/\/(?:image\.prntscr\.com|img\.lightshot\.app)\/([a-zA-Z0-9_\-\.\/]+)/i,
+      /(?:image\.prntscr\.com|img\.lightshot\.app)\/([a-zA-Z0-9_\-\.\/]+)/i
+    ];
+
+    for (let i = 0; i < patterns.length; i++) {
+      const pattern = patterns[i];
+      const match = html.match(pattern);
+      if (match) {
+        let imageUrl = match[1];
+
+        // Normalize URL
+        if (imageUrl.startsWith('//')) {
+          imageUrl = 'https:' + imageUrl;
+        } else if (!imageUrl.startsWith('http')) {
+          // If we only got the path/filename, construct full URL
+          if (imageUrl.includes('image.prntscr.com') || imageUrl.includes('img.lightshot.app')) {
+            imageUrl = 'https://' + imageUrl;
+          } else {
+            // Default to img.lightshot.app (Lightshot's current CDN)
+            imageUrl = 'https://img.lightshot.app/' + imageUrl;
+          }
+        }
+
+        console.log(`[Background] Found image URL with pattern ${i}:`, imageUrl);
+        return { success: true, imageUrl: imageUrl };
+      }
+    }
+
+    // If no patterns matched, log more details for debugging
+    console.log('[Background] No image URL found in HTML');
+    console.log('[Background] Searching for any image domain occurrence...');
+
+    // Check if domain exists anywhere
+    const domains = ['image.prntscr.com', 'img.lightshot.app'];
+    for (const domain of domains) {
+      if (html.includes(domain)) {
+        const index = html.indexOf(domain);
+        console.log(`[Background] Found "${domain}" at position:`, index);
+        console.log('[Background] Context around it:', html.substring(Math.max(0, index - 100), Math.min(html.length, index + 200)));
+      }
+    }
+
+    return { success: false, error: 'Could not find image URL in page' };
+
+  } catch (error) {
+    console.error('[Background] Lightshot extraction error:', error);
     return { success: false, error: error.message };
   }
 }

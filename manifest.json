@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "LinkCaster",
   "version": "1.0.0",
-  "description": "Upload images and videos to cloud + convert links from one host to another",
+  "description": "LinkCaster converts image and video share links into direct downloadable URLs and allows one-click uploads to external storage providers.",
   "permissions": [
     "activeTab",
     "storage",
@@ -13,6 +13,7 @@
     "https://prntscr.com/*",
     "https://lightshot.com/*",
     "https://image.prntscr.com/*",
+    "https://img.lightshot.app/*",
     "https://catbox.moe/*",
     "https://api.imgur.com/*",
     "https://freeimage.host/*",

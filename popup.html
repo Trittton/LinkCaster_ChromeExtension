@@ -23,50 +23,53 @@
 
     <!-- Convert Tab -->
     <div id="tab-convert" class="tab-content active">
-      <div class="settings">
-      <div class="settings-header">
-        <label for="host-select">Upload Service</label>
-        <button id="settings-toggle" class="icon-btn small" title="API Settings" style="display: none;">
-          <span class="settings-icon">⚙️</span>
-          <span class="warning-badge" id="api-warning" style="display: none;">⚠️</span>
-        </button>
-      </div>
-      <select id="host-select">
-        <option value="catbox">Catbox.moe</option>
-        <option value="freeimage">FreeImage.host</option>
-        <option value="vgy">vgy.me</option>
-        <option value="flickr">Flickr</option>
-        <option value="gyazo">Gyazo</option>
-        <option value="gdrive">Google Drive</option>
-      </select>
-      <small class="service-info" id="service-info" style="display: none; margin-top: 6px; color: var(--text-dimmed); font-size: 11px;"></small>
-    </div>
-
-    <div class="oauth-container" id="oauth-container" style="display: none;">
-      <button id="oauth-connect" class="primary" style="width: 100%; margin-bottom: 12px;">
-        <span id="oauth-text">Connect to Flickr</span>
-      </button>
-      <small id="oauth-status" style="display: block; color: var(--text-dimmed); font-size: 11px; text-align: center;"></small>
-    </div>
-
-    <!-- Google Drive Connection (Convert Tab) -->
-    <div class="gdrive-connection" id="convert-gdrive-connection" style="display: none;">
-      <div style="background: var(--bg-secondary); padding: 12px; border-radius: 8px; margin-bottom: 12px;">
-        <label style="display: block; margin-bottom: 8px;">Google Drive Connection</label>
-        <div class="button-group" style="margin-bottom: 8px;">
-          <button id="convert-gdrive-connect" class="primary">Connect to Google Drive</button>
-          <button id="convert-gdrive-unlink" class="secondary" style="display: none;">Unlink</button>
+      <!-- Header with Settings and History Buttons -->
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+        <h3 style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin: 0;">Image Converter</h3>
+        <div style="display: flex; gap: 4px;">
+          <button id="convert-history-btn" class="icon-btn small" title="Conversion History">📜</button>
+          <button id="convert-settings-btn" class="icon-btn small" title="Settings">⚙️</button>
         </div>
-        <small id="convert-gdrive-status" style="display: block; color: var(--text-dimmed); font-size: 11px; text-align: center;"></small>
       </div>
-    </div>
 
-    <div class="api-settings" id="api-settings" style="display: none;">
-      <label for="api-key" id="api-label">API Key</label>
-      <input type="text" id="api-key" placeholder="Enter your API key">
-      <small id="api-help">Get your API key from <a href="#" target="_blank" id="api-link">here</a></small>
-      <button id="save-api-key">Save API Key</button>
-    </div>
+      <!-- Settings Panel (Hidden by default) -->
+      <div class="settings-panel" id="convert-settings-panel" style="display: none;">
+        <label for="host-select">Upload Service</label>
+        <select id="host-select" style="margin-top: 8px;">
+          <option value="catbox">Catbox.moe</option>
+          <option value="vgy">vgy.me</option>
+          <option value="gdrive">Google Drive</option>
+        </select>
+
+        <!-- vgy.me API Key (shown when vgy selected) -->
+        <div id="api-settings" style="display: none; margin-top: 12px;">
+          <label for="api-key" style="display: block; margin-bottom: 8px;">vgy.me User Key</label>
+          <input type="text" id="api-key" placeholder="Enter your vgy.me user key" style="width: 100%; padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--input-bg); color: var(--text-secondary); font-size: 13px;">
+          <small id="api-help" style="display: block; margin-top: 6px; color: var(--text-dimmed); font-size: 11px;">Get your user key from <a href="https://vgy.me/account/details" target="_blank" id="api-link" style="color: #4a9eff; text-decoration: none;">vgy.me account</a></small>
+          <button id="save-api-key" class="primary" style="margin-top: 8px; width: 100%;">Save API Key</button>
+        </div>
+
+        <!-- Google Drive Connection (shown when gdrive selected) -->
+        <div class="gdrive-connection" id="convert-gdrive-connection" style="display: none; margin-top: 12px;">
+          <label style="display: block; margin-bottom: 8px;">Google Drive Connection</label>
+          <div class="button-group" style="margin-bottom: 8px;">
+            <button id="convert-gdrive-connect" class="primary">Connect to Google Drive</button>
+            <button id="convert-gdrive-unlink" class="secondary" style="display: none;">Unlink</button>
+          </div>
+          <small id="convert-gdrive-status" style="display: block; color: var(--text-dimmed); font-size: 11px; text-align: center;"></small>
+        </div>
+      </div>
+
+      <!-- History Panel -->
+      <div class="history-panel" id="convert-history-panel" style="display: none;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+          <label style="margin: 0;">Upload History</label>
+          <button id="clear-convert-history" class="secondary" style="font-size: 11px; padding: 4px 8px;">Clear All</button>
+        </div>
+        <div id="convert-history-list" style="max-height: 300px; overflow-y: auto;">
+          <p style="text-align: center; color: var(--text-dimmed); font-size: 12px; padding: 20px;">No uploads yet</p>
+        </div>
+      </div>
 
     <div class="input-section">
       <label for="input-text">Paste Links</label>
@@ -205,33 +208,20 @@
           </div>
         </div>
 
-        <!-- First-time connection prompt -->
-        <div class="gdrive-first-time" id="gdrive-first-time" style="display: none;">
-          <div class="gdrive-prompt-card">
-            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
-              <span style="font-size: 20px;">🔐</span>
-              <strong style="font-size: 13px;">Connect Google Drive</strong>
-            </div>
-            <p style="font-size: 11px; color: var(--text-dimmed); margin: 0 0 8px 0;">
-              Videos will be uploaded to your Google Drive with shareable links.
-            </p>
-            <button id="gdrive-connect-first" class="primary" style="width: 100%;">
-              Connect to Google Drive
-            </button>
-          </div>
-        </div>
-
         <!-- Settings Panel -->
         <div class="gdrive-settings" id="gdrive-settings" style="display: none;">
-          <label>Google Drive Connection</label>
-          <div class="button-group" style="margin-top: 8px;">
-            <button id="gdrive-connect" class="primary">Connect to Google Drive</button>
-            <button id="gdrive-unlink" class="secondary" style="display: none;">Unlink</button>
+          <!-- Google Drive Connection -->
+          <div style="margin-bottom: 12px;">
+            <label style="display: block; margin-bottom: 8px;">Google Drive Connection</label>
+            <div class="button-group" style="margin-bottom: 8px;">
+              <button id="video-gdrive-connect" class="primary">Connect to Google Drive</button>
+              <button id="video-gdrive-unlink" class="secondary" style="display: none;">Unlink</button>
+            </div>
+            <small id="video-gdrive-status" style="display: block; color: var(--text-dimmed); font-size: 11px; text-align: center;"></small>
           </div>
-          <small id="gdrive-status" style="display: block; color: var(--text-dimmed); font-size: 11px; text-align: center; margin-top: 6px;"></small>
 
           <!-- Folder Monitoring -->
-          <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-color);">
+          <div style="border-top: 1px solid var(--border-color); padding-top: 12px;">
             <label>Auto-Detect New Files</label>
             <button id="video-select-folder" class="secondary" style="width: 100%; margin-top: 8px;">Select Folder to Monitor</button>
             <small id="video-folder-path" style="display: block; color: var(--text-dimmed); font-size: 11px; margin-top: 6px;">No folder selected</small>
@@ -258,7 +248,7 @@
         <!-- Upload section (visible when connected) -->
         <div id="gdrive-upload-section" style="display: none;">
           <!-- Detected Files List -->
-          <div id="video-detected-files" style="display: none; margin-bottom: 12px;">
+          <div id="video-detected-files" style="margin-bottom: 12px;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
               <label style="margin: 0;">Detected Files</label>
               <button id="video-refresh-files" class="secondary" style="font-size: 11px; padding: 4px 8px;">Refresh</button>

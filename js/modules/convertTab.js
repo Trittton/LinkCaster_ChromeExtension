@@ -6,8 +6,9 @@
 
 import { logErrorMessage, logInfo, withErrorLogging } from './errorLogger.js';
 import { isValidImageUrl, extractValidUrls } from './validator.js';
-import { showStatus, updateProgress, StatusType } from './uiHelpers.js';
-import { getStorage, setStorage } from './storage.js';
+import { showStatus, updateProgress, StatusType, formatDate } from './uiHelpers.js';
+import { getStorage, setStorage, addToHistory, getHistory, clearHistory } from './storage.js';
+import { uploadToCatbox, uploadToGoogleDrive, downloadImage, getDirectImageUrl } from './uploadServices.js';
 
 /**
  * Configuration for API links and OAuth
@@ -55,6 +56,9 @@ async function loadSavedState(elements) {
 
     elements.hostSelect.value = syncData.selectedHost || 'catbox';
 
+    // Update API UI to show service-specific settings
+    await updateApiUI(elements);
+
     await logInfo('Convert tab state loaded');
   } catch (error) {
     await logErrorMessage('Failed to load convert tab state', error);
@@ -67,12 +71,52 @@ async function loadSavedState(elements) {
  * @returns {void}
  */
 function setupEventListeners(elements) {
+  // Convert tab settings button toggle
+  if (elements.convertSettingsBtn) {
+    elements.convertSettingsBtn.addEventListener('click', () => {
+      const isVisible = elements.convertSettingsPanel.style.display === 'block';
+      elements.convertSettingsPanel.style.display = isVisible ? 'none' : 'block';
+      // Hide history panel when showing settings
+      if (!isVisible && elements.convertHistoryPanel) {
+        elements.convertHistoryPanel.style.display = 'none';
+      }
+    });
+  }
+
+  // Convert tab history button toggle
+  if (elements.convertHistoryBtn) {
+    elements.convertHistoryBtn.addEventListener('click', () => {
+      const isVisible = elements.convertHistoryPanel.style.display === 'block';
+      elements.convertHistoryPanel.style.display = isVisible ? 'none' : 'block';
+      // Hide settings panel when showing history
+      if (!isVisible && elements.convertSettingsPanel) {
+        elements.convertSettingsPanel.style.display = 'none';
+      }
+      // Render history when opening panel
+      if (!isVisible) {
+        renderConvertHistory(elements);
+      }
+    });
+  }
+
+  // Clear history button
+  if (elements.clearConvertHistory) {
+    elements.clearConvertHistory.addEventListener('click', () => handleClearConvertHistory(elements));
+  }
+
   elements.replaceBtn.addEventListener('click', () => handleReplace(elements));
   elements.clearBtn.addEventListener('click', () => handleClear(elements));
   elements.copyBtn.addEventListener('click', () => handleCopy(elements));
   elements.hostSelect.addEventListener('change', () => handleHostChange(elements));
-  elements.settingsToggle.addEventListener('click', () => handleSettingsToggle(elements));
   elements.saveApiKey.addEventListener('click', () => handleSaveApiKey(elements));
+
+  // Google Drive event listeners
+  if (elements.convertGdriveConnect) {
+    elements.convertGdriveConnect.addEventListener('click', () => handleConvertGDriveConnect(elements));
+  }
+  if (elements.convertGdriveUnlink) {
+    elements.convertGdriveUnlink.addEventListener('click', () => handleConvertGDriveUnlink(elements));
+  }
 
   // Auto-save input text with debouncing
   let saveTimeout;
@@ -92,7 +136,6 @@ function setupEventListeners(elements) {
 async function handleHostChange(elements) {
   await setStorage({ selectedHost: elements.hostSelect.value }, 'sync');
   await updateApiUI(elements);
-  await checkApiKeyStatus(elements);
 }
 
 /**
@@ -102,27 +145,20 @@ async function handleHostChange(elements) {
  */
 export async function updateApiUI(elements) {
   const host = elements.hostSelect.value;
-  const needsSetup = ['vgy', 'flickr', 'gyazo', 'gdrive'].includes(host);
 
-  elements.settingsToggle.style.display = needsSetup ? 'inline-flex' : 'none';
-
-  if (SERVICE_INFO[host]) {
-    elements.serviceInfo.textContent = SERVICE_INFO[host];
-    elements.serviceInfo.style.display = 'block';
-  } else {
-    elements.serviceInfo.style.display = 'none';
-  }
-
-  // Hide all settings panels
+  // Hide all settings panels first
   elements.apiSettings.style.display = 'none';
-  elements.oauthContainer.style.display = 'none';
   if (elements.convertGdriveConnection) {
     elements.convertGdriveConnection.style.display = 'none';
   }
 
-  // Show appropriate panel for selected service
-  if (host === 'gdrive' && elements.convertGdriveConnection) {
+  // Show appropriate panel based on selected service
+  if (host === 'vgy') {
+    elements.apiSettings.style.display = 'block';
+  } else if (host === 'gdrive' && elements.convertGdriveConnection) {
     elements.convertGdriveConnection.style.display = 'block';
+    // Update Google Drive status from shared storage
+    await updateConvertGDriveStatus(elements);
   }
 }
 
@@ -358,11 +394,32 @@ async function processUrls(urls, host, elements) {
     try {
       const result = await processUrl(url, host);
       results.push(result);
+
+      // Save successful conversions to history
+      if (result.success && result.new !== result.original) {
+        await addToHistory('convertHistory', {
+          originalUrl: result.original,
+          convertedUrl: result.new,
+          service: host,
+          timestamp: Date.now()
+        });
+      }
     } catch (error) {
       if (error.message === 'GOOGLE_DRIVE_SESSION_EXPIRED') {
+        // Mark as disconnected
+        await setStorage({ googleDriveConnected: false });
+
+        // Update UI
         elements.progressSection.style.display = 'none';
         elements.replaceBtn.disabled = false;
-        alert('⚠️ Google Drive session expired!\n\nPlease reconnect to Google Drive to continue converting images.');
+
+        // Open settings panel and update Google Drive status
+        elements.convertSettingsPanel.style.display = 'block';
+        await updateApiUI(elements);
+
+        // Show alert
+        showStatus('⚠️ Google Drive session expired. Please reconnect in Settings.', StatusType.ERROR, elements.statusDiv);
+        alert('⚠️ Google Drive session expired!\n\nPlease reconnect to Google Drive in Settings (⚙️) to continue converting images.');
         return results;
       }
 
@@ -387,9 +444,69 @@ async function processUrls(urls, host, elements) {
  */
 async function processUrl(url, host) {
   const wrappedFn = withErrorLogging(async () => {
-    // Implementation delegated to upload functions (to be imported)
-    // This is a placeholder - actual implementation will use upload modules
-    throw new Error('Not implemented - will be connected to upload modules');
+    try {
+      // Get direct image URL (handles page URLs like prnt.sc)
+      const directUrl = await getDirectImageUrl(url);
+
+      // Download image from direct URL
+      const imageBlob = await downloadImage(directUrl);
+
+      // Upload to selected host
+      let newUrl;
+      if (host === 'catbox') {
+        newUrl = await uploadToCatbox(imageBlob);
+      } else if (host === 'gdrive') {
+        // Get Google Drive session ID
+        const data = await getStorage(['googleDriveSessionId', 'googleDriveConnected']);
+        if (!data.googleDriveSessionId || !data.googleDriveConnected) {
+          throw new Error('Google Drive not connected. Please connect in settings.');
+        }
+        newUrl = await uploadToGoogleDrive(imageBlob, data.googleDriveSessionId);
+      } else if (host === 'vgy') {
+        // Get vgy API key
+        const data = await getStorage(['vgyApiKey'], 'sync');
+        if (!data.vgyApiKey) {
+          throw new Error('vgy.me API key not configured. Please add your key in settings.');
+        }
+
+        // Create form data for vgy.me upload
+        const formData = new FormData();
+        formData.append('userkey', data.vgyApiKey);
+        formData.append('file', imageBlob, 'image.jpg');
+
+        const response = await fetch('https://vgy.me/upload', {
+          method: 'POST',
+          body: formData
+        });
+
+        const result = await response.json();
+        if (!result.success) {
+          throw new Error(result.error || 'vgy.me upload failed');
+        }
+
+        newUrl = result.image;
+      } else {
+        throw new Error(`Unsupported host: ${host}`);
+      }
+
+      return {
+        original: url,
+        new: newUrl,
+        success: true
+      };
+    } catch (error) {
+      // Check for Google Drive session expiry
+      if (error.message === 'GOOGLE_DRIVE_SESSION_EXPIRED') {
+        throw error; // Re-throw to be handled by processUrls
+      }
+
+      return {
+        original: url,
+        new: '',
+        success: false,
+        error: error.message
+      };
+    }
   }, 'processUrl');
 
   return wrappedFn();
@@ -411,4 +528,149 @@ function replaceUrlsInText(originalText, results) {
   });
 
   return newText;
+}
+
+/**
+ * Updates Convert tab Google Drive connection status
+ * @param {Object} elements - DOM elements
+ * @returns {Promise<void>}
+ */
+export async function updateConvertGDriveStatus(elements) {
+  const data = await getStorage(['googleDriveConnected', 'googleDriveConnectedAt']);
+
+  if (data.googleDriveConnected) {
+    if (elements.convertGdriveConnect) elements.convertGdriveConnect.style.display = 'none';
+    if (elements.convertGdriveUnlink) elements.convertGdriveUnlink.style.display = 'block';
+    if (elements.convertGdriveStatus) {
+      const date = data.googleDriveConnectedAt ? new Date(data.googleDriveConnectedAt).toLocaleDateString() : 'Unknown';
+      elements.convertGdriveStatus.textContent = `Connected - ${date}`;
+      elements.convertGdriveStatus.style.color = '#38ef7d';
+    }
+  } else {
+    if (elements.convertGdriveConnect) elements.convertGdriveConnect.style.display = 'block';
+    if (elements.convertGdriveUnlink) elements.convertGdriveUnlink.style.display = 'none';
+    if (elements.convertGdriveStatus) {
+      elements.convertGdriveStatus.textContent = 'Not connected';
+      elements.convertGdriveStatus.style.color = 'var(--text-dimmed)';
+    }
+  }
+}
+
+/**
+ * Handles Convert tab Google Drive connect
+ * @param {Object} elements - DOM elements
+ * @returns {Promise<void>}
+ */
+async function handleConvertGDriveConnect(elements) {
+  try {
+    const response = await chrome.runtime.sendMessage({ action: 'googleDriveOAuth' });
+
+    if (response.success) {
+      showStatus('Connected to Google Drive!', StatusType.SUCCESS, elements.statusDiv);
+      await updateConvertGDriveStatus(elements);
+      await logInfo('Connected to Google Drive from Convert tab');
+    } else {
+      showStatus('Failed to connect: ' + response.error, StatusType.ERROR, elements.statusDiv);
+      await logErrorMessage('Google Drive connection failed', new Error(response.error));
+    }
+  } catch (error) {
+    showStatus('Connection failed: ' + error.message, StatusType.ERROR, elements.statusDiv);
+    await logErrorMessage('Google Drive connection error', error);
+  }
+}
+
+/**
+ * Handles Convert tab Google Drive unlink
+ * @param {Object} elements - DOM elements
+ * @returns {Promise<void>}
+ */
+async function handleConvertGDriveUnlink(elements) {
+  await setStorage({
+    googleDriveSessionId: null,
+    googleDriveConnected: false
+  });
+
+  showStatus('Disconnected from Google Drive', StatusType.SUCCESS, elements.statusDiv);
+  await updateConvertGDriveStatus(elements);
+  await logInfo('Disconnected from Google Drive from Convert tab');
+}
+
+/**
+ * Renders conversion history
+ * @param {Object} elements - DOM elements
+ * @returns {Promise<void>}
+ */
+async function renderConvertHistory(elements) {
+  const history = await getHistory('convertHistory');
+
+  if (!history || history.length === 0) {
+    elements.convertHistoryList.innerHTML = '<p style="text-align: center; color: var(--text-dimmed); font-size: 12px; padding: 20px;">No uploads yet</p>';
+    return;
+  }
+
+  const html = history.map(item => {
+    const date = formatDate(item.timestamp);
+    const serviceName = item.service === 'catbox' ? 'Catbox.moe' :
+                       item.service === 'gdrive' ? 'Google Drive' :
+                       item.service === 'vgy' ? 'vgy.me' : item.service;
+
+    return `
+      <div class="history-item" style="padding: 12px; margin-bottom: 8px; background: var(--bg-secondary); border: 1px solid var(--border-light); border-radius: 6px;">
+        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
+          <div style="flex: 1; min-width: 0;">
+            <div style="font-size: 11px; color: var(--text-dimmed); margin-bottom: 4px;">${date}</div>
+            <div style="font-size: 10px; color: var(--text-muted);">
+              <span style="color: #667eea; font-weight: 600;">${serviceName}</span>
+            </div>
+          </div>
+        </div>
+        <div style="margin-bottom: 6px;">
+          <div style="font-size: 10px; color: var(--text-dimmed); margin-bottom: 2px;">Original:</div>
+          <a href="${item.originalUrl}" target="_blank" style="font-size: 11px; color: var(--text-secondary); word-break: break-all; text-decoration: none; display: block; padding: 4px 6px; background: var(--bg-tertiary); border-radius: 4px; transition: all 0.2s;" onmouseover="this.style.color='#667eea'" onmouseout="this.style.color='var(--text-secondary)'">${item.originalUrl}</a>
+        </div>
+        <div>
+          <div style="font-size: 10px; color: var(--text-dimmed); margin-bottom: 2px;">Converted:</div>
+          <a href="${item.convertedUrl}" target="_blank" style="font-size: 11px; color: #38ef7d; word-break: break-all; text-decoration: none; display: block; padding: 4px 6px; background: var(--bg-tertiary); border-radius: 4px; transition: all 0.2s;" onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'">${item.convertedUrl}</a>
+        </div>
+        <div class="history-item-actions" style="display: flex; gap: 6px; margin-top: 8px;">
+          <button class="copy-original-btn secondary" data-url="${item.originalUrl}" style="font-size: 10px; padding: 4px 10px;">Copy Original</button>
+          <button class="copy-converted-btn secondary" data-url="${item.convertedUrl}" style="font-size: 10px; padding: 4px 10px;">Copy Converted</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  elements.convertHistoryList.innerHTML = html;
+
+  // Add copy button event listeners
+  elements.convertHistoryList.querySelectorAll('.copy-original-btn, .copy-converted-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const url = e.target.dataset.url;
+      try {
+        await navigator.clipboard.writeText(url);
+        e.target.textContent = '✓ Copied';
+        setTimeout(() => {
+          e.target.textContent = e.target.classList.contains('copy-original-btn') ? 'Copy Original' : 'Copy Converted';
+        }, 1500);
+      } catch (error) {
+        await logErrorMessage('Failed to copy URL from history', error);
+      }
+    });
+  });
+}
+
+/**
+ * Handles clearing conversion history
+ * @param {Object} elements - DOM elements
+ * @returns {Promise<void>}
+ */
+async function handleClearConvertHistory(elements) {
+  if (!confirm('Are you sure you want to clear all conversion history?')) {
+    return;
+  }
+
+  await clearHistory('convertHistory');
+  await renderConvertHistory(elements);
+  showStatus('History cleared', StatusType.SUCCESS, elements.statusDiv);
+  await logInfo('Conversion history cleared');
 }

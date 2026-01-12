@@ -150,18 +150,27 @@ export function createHistoryItemHtml(item, copyBtnClass, openBtnClass) {
  * @param {number} fileInfo.size - File size in bytes
  * @param {number} fileInfo.lastModified - Last modified timestamp
  * @param {boolean} fileInfo.uploaded - Whether file was uploaded
+ * @param {string} [fileInfo.url] - URL of uploaded file (optional)
  * @param {boolean} [wasChecked=false] - Whether checkbox should be checked
  * @returns {string} HTML string
  */
 export function createFileItemHtml(fileInfo, wasChecked = false) {
   const uploadedClass = fileInfo.uploaded ? 'uploaded' : '';
-  const uploadedBadge = fileInfo.uploaded
-    ? '<span style="color: #38ef7d; font-size: 10px; margin-left: 8px;">✓ Uploaded</span>'
-    : '';
+
+  // Create uploaded badge - clickable if URL is available
+  let uploadedBadge = '';
+  if (fileInfo.uploaded) {
+    if (fileInfo.url) {
+      uploadedBadge = `<a href="${sanitizeHtml(fileInfo.url)}" target="_blank" class="uploaded-badge-link" style="color: #38ef7d; font-size: 10px; margin-left: 8px; text-decoration: none; cursor: pointer; transition: opacity 0.2s;" onmouseover="this.style.opacity='0.7'" onmouseout="this.style.opacity='1'" title="Click to open uploaded file">✓ Uploaded</a>`;
+    } else {
+      uploadedBadge = '<span style="color: #38ef7d; font-size: 10px; margin-left: 8px;">✓ Uploaded</span>';
+    }
+  }
+
   const sizeStr = formatFileSize(fileInfo.size);
   const timeStr = new Date(fileInfo.lastModified).toLocaleTimeString();
   const safeFileName = sanitizeHtml(fileInfo.name);
-  const checkedAttr = wasChecked && !fileInfo.uploaded ? 'checked' : '';
+  const checkedAttr = wasChecked ? 'checked' : '';
 
   return `
     <div class="file-item ${uploadedClass}" style="padding: 8px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">
@@ -173,7 +182,7 @@ export function createFileItemHtml(fileInfo, wasChecked = false) {
           ${sizeStr} • ${timeStr}
         </div>
       </div>
-      <input type="checkbox" class="file-checkbox" data-filename="${safeFileName}" ${fileInfo.uploaded ? 'disabled' : ''} ${checkedAttr} style="margin-left: 8px;">
+      <input type="checkbox" class="file-checkbox" data-filename="${safeFileName}" ${checkedAttr} style="margin-left: 8px;">
     </div>
   `;
 }

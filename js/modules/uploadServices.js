@@ -6,7 +6,7 @@
 
 import { logErrorMessage, logInfo, withErrorLogging } from './errorLogger.js';
 import { validateImageFile, sanitizeFilename } from './validator.js';
-import { getStorage } from './storage.js';
+import { getStorage, setStorage } from './storage.js';
 
 /**
  * Converts blob to base64 data URL
@@ -64,6 +64,28 @@ export async function getDirectImageUrl(url) {
   // Handle Lightshot/prnt.sc URLs
   if (url.includes('prnt.sc') || url.includes('prntscr.com')) {
     return await withErrorLogging(async () => {
+      console.log('[DEBUG] Processing Lightshot URL:', url);
+
+      // Try using background script to fetch the image URL with proper rendering
+      try {
+        console.log('[DEBUG] Attempting extraction via background script...');
+        const response = await chrome.runtime.sendMessage({
+          action: 'extractLightshotImage',
+          url: url
+        });
+
+        if (response && response.success && response.imageUrl) {
+          console.log('[DEBUG] Successfully extracted image URL:', response.imageUrl);
+          return response.imageUrl;
+        } else {
+          console.warn('[DEBUG] Background extraction returned no URL:', response);
+        }
+      } catch (error) {
+        console.warn('[DEBUG] Background extraction failed:', error.message);
+      }
+
+      // Fallback: Try direct fetch (unlikely to work due to JS requirement)
+      console.log('[DEBUG] Falling back to direct fetch...');
       const response = await fetch(url);
 
       if (!response.ok) {
@@ -71,22 +93,40 @@ export async function getDirectImageUrl(url) {
       }
 
       const html = await response.text();
+      console.log('[DEBUG] HTML length:', html.length);
 
-      const imageMatch = html.match(/src=["']([^"']*image\.prntscr\.com[^"']*)["']/i) ||
-                        html.match(/src=["']\/\/(image\.prntscr\.com[^"']*)["']/i) ||
-                        html.match(/"(https?:\/\/image\.prntscr\.com[^"]+)"/i);
+      // Try multiple patterns to find the image URL (Lightshot now uses img.lightshot.app)
+      const patterns = [
+        /property=["']og:image["']\s+content=["']([^"']*(?:image\.prntscr\.com|img\.lightshot\.app)[^"']*)["']/i,
+        /name=["']twitter:image:src["']\s+content=["']([^"']*(?:image\.prntscr\.com|img\.lightshot\.app)[^"']*)["']/i,
+        /src=["']([^"']*(?:image\.prntscr\.com|img\.lightshot\.app)[^"']*)["']/i,
+        /src=["']\/\/((?:image\.prntscr\.com|img\.lightshot\.app)[^"']*)["']/i,
+        /"(https?:\/\/(?:image\.prntscr\.com|img\.lightshot\.app)[^"]+)"/i,
+        /content=["']([^"']*(?:image\.prntscr\.com|img\.lightshot\.app)[^"']*)["']\s+property=["']og:image["']/i,
+        /(?:image\.prntscr\.com|img\.lightshot\.app)\/([^"'\s<>]+)/i
+      ];
 
-      if (imageMatch) {
-        let imageUrl = imageMatch[1];
-        if (imageUrl.startsWith('//')) {
-          imageUrl = 'https:' + imageUrl;
-        } else if (!imageUrl.startsWith('http')) {
-          imageUrl = 'https://' + imageUrl;
+      for (const pattern of patterns) {
+        const match = html.match(pattern);
+        if (match) {
+          let imageUrl = match[1];
+          if (imageUrl.startsWith('//')) {
+            imageUrl = 'https:' + imageUrl;
+          } else if (!imageUrl.startsWith('http')) {
+            // Check if it contains the domain
+            if (imageUrl.includes('image.prntscr.com') || imageUrl.includes('img.lightshot.app')) {
+              imageUrl = 'https://' + imageUrl;
+            } else {
+              // Default to img.lightshot.app (Lightshot's current CDN)
+              imageUrl = 'https://img.lightshot.app/' + imageUrl;
+            }
+          }
+          console.log('[DEBUG] Extracted image URL from HTML:', imageUrl);
+          return imageUrl;
         }
-        return imageUrl;
       }
 
-      throw new Error('Could not find image in Lightshot page (may be deleted)');
+      throw new Error('Could not find image in Lightshot page - the image may be deleted, or Lightshot requires JavaScript which we cannot execute');
     }, 'getDirectImageUrl - Lightshot')();
   }
 
