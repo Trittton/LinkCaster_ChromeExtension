@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "LinkCaster",
   "version": "1.0.0",
-  "description": "LinkCaster converts image and video share links into direct downloadable URLs and allows one-click uploads to external storage providers.",
+  "description": "Convert share links to direct downloadable URLs and upload files to cloud storage providers.",
   "permissions": [
     "activeTab",
     "storage",
