@@ -4,7 +4,6 @@
   "version": "1.0.0",
   "description": "Convert share links to direct downloadable URLs and upload files to cloud storage providers.",
   "permissions": [
-    "activeTab",
     "storage",
     "identity"
   ],
