@@ -140,28 +140,68 @@ export async function getDirectImageUrl(url) {
  */
 export async function uploadToCatbox(file) {
   const wrappedFn = withErrorLogging(async () => {
-    const formData = new FormData();
-    formData.append('fileToUpload', file, 'image.png');
-    formData.append('reqtype', 'fileupload');
+    const MAX_RETRIES = 3;
+    const TIMEOUT_MS = 60000; // 60 seconds timeout (Catbox can be slow)
 
-    const response = await fetch('https://catbox.moe/user/api.php', {
-      method: 'POST',
-      body: formData
-    });
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        // Add a small delay before each attempt (except first) to avoid rate limiting
+        if (attempt > 0) {
+          const waitTime = Math.min(2000 * Math.pow(2, attempt - 1), 10000);
+          await logInfo(`Waiting ${waitTime}ms before retry ${attempt}...`);
+          await new Promise(resolve => setTimeout(resolve, waitTime));
+        }
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Catbox upload failed: ${response.status}`);
+        const formData = new FormData();
+        formData.append('fileToUpload', file, 'image.png');
+        formData.append('reqtype', 'fileupload');
+
+        // Create abort controller for timeout
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
+        await logInfo(`Uploading to Catbox (attempt ${attempt + 1}/${MAX_RETRIES + 1})...`);
+
+        const response = await fetch('https://catbox.moe/user/api.php', {
+          method: 'POST',
+          body: formData,
+          signal: controller.signal,
+          mode: 'cors',
+          credentials: 'omit'
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Catbox upload failed: ${response.status} - ${errorText}`);
+        }
+
+        const url = await response.text();
+
+        if (url && url.startsWith('http')) {
+          await logInfo('Catbox upload successful', { url, attempt: attempt + 1 });
+          return url.trim();
+        }
+
+        throw new Error('Catbox returned invalid response: ' + url);
+      } catch (error) {
+        await logErrorMessage(`Catbox upload attempt ${attempt + 1} failed`, error);
+
+        // If this is the last attempt, throw the error
+        if (attempt === MAX_RETRIES) {
+          if (error.name === 'AbortError') {
+            throw new Error('Catbox upload timed out after 60 seconds. The service might be slow or unavailable.');
+          }
+          if (error.message.includes('Failed to fetch')) {
+            throw new Error('Cannot connect to Catbox. Please check your internet connection or try again later.');
+          }
+          throw error;
+        }
+
+        await logInfo(`Will retry in a moment...`);
+      }
     }
-
-    const url = await response.text();
-
-    if (url && url.startsWith('http')) {
-      await logInfo('Catbox upload successful', { url });
-      return url.trim();
-    }
-
-    throw new Error('Catbox returned invalid response: ' + url);
   }, 'uploadToCatbox');
 
   return wrappedFn();

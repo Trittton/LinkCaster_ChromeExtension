@@ -183,6 +183,11 @@ function setupEventListeners(elements) {
   // Refresh files
   if (elements.refreshFiles) {
     elements.refreshFiles.addEventListener('click', async () => {
+      if (!imageFolderHandle) {
+        showStatus('Please select a folder first', StatusType.ERROR, getStatusElement());
+        return;
+      }
+
       if (imageFolderHandle) {
         const hasPermission = await checkFolderPermission(imageFolderHandle);
         if (!hasPermission) {
@@ -392,44 +397,75 @@ async function handleUploadImages(elements) {
 
   const urls = [];
   const uploadedFilenames = [];
+  // Catbox is very sensitive to parallel requests - use sequential uploads
+  const CONCURRENCY_LIMIT = service === 'catbox' ? 1 : 3;
   let completed = 0;
 
   try {
-    for (const file of filesToUpload) {
-      // Validate file
-      const validation = validateImageFile(file);
-      if (!validation.valid) {
-        await logWarning('Image validation failed', { file: file.name, error: validation.error });
-        urls.push(`Error: ${file.name} - ${validation.error}`);
-        completed++;
-        continue;
-      }
+    // Process files in batches with concurrency limit
+    for (let i = 0; i < filesToUpload.length; i += CONCURRENCY_LIMIT) {
+      const batch = filesToUpload.slice(i, i + CONCURRENCY_LIMIT);
 
-      try {
-        let url;
-        if (service === 'gdrive') {
-          const data = await getStorage(['googleDriveSessionId']);
-          url = await uploadToGoogleDrive(file, data.googleDriveSessionId);
-        } else {
-          url = await uploadToCatbox(file);
+      const batchPromises = batch.map(async (file) => {
+        // Validate file
+        const validation = validateImageFile(file);
+        if (!validation.valid) {
+          await logWarning('Image validation failed', { file: file.name, error: validation.error });
+          return {
+            success: false,
+            url: `Error: ${file.name} - ${validation.error}`,
+            filename: file.name
+          };
         }
 
-        urls.push(url);
-        uploadedFilenames.push(file.name);
+        try {
+          let url;
+          if (service === 'gdrive') {
+            const data = await getStorage(['googleDriveSessionId']);
+            url = await uploadToGoogleDrive(file, data.googleDriveSessionId);
+          } else {
+            url = await uploadToCatbox(file);
+          }
 
-        // Add to history
-        await addToHistory('imageUploadHistory', {
-          fileName: file.name,
-          url: url,
-          timestamp: Date.now()
-        });
+          // Add to history
+          await addToHistory('imageUploadHistory', {
+            fileName: file.name,
+            url: url,
+            timestamp: Date.now()
+          });
 
+          return {
+            success: true,
+            url: url,
+            filename: file.name
+          };
+        } catch (error) {
+          await logErrorMessage(`Failed to upload ${file.name}`, error);
+          return {
+            success: false,
+            url: `Error: ${file.name} - ${error.message}`,
+            filename: file.name
+          };
+        }
+      });
+
+      // Wait for all uploads in the batch to complete
+      const batchResults = await Promise.allSettled(batchPromises);
+
+      for (const settledResult of batchResults) {
         completed++;
         updateProgress(completed, filesToUpload.length, `Uploaded ${completed}/${filesToUpload.length}`, elements.progressFill, elements.progressText);
-      } catch (error) {
-        await logErrorMessage(`Failed to upload ${file.name}`, error);
-        urls.push(`Error: ${file.name} - ${error.message}`);
-        completed++;
+
+        if (settledResult.status === 'fulfilled') {
+          const result = settledResult.value;
+          urls.push(result.url);
+          if (result.success) {
+            uploadedFilenames.push(result.filename);
+          }
+        } else {
+          // Handle rejected promise
+          urls.push(`Error: Upload failed - ${settledResult.reason?.message || 'Unknown error'}`);
+        }
       }
     }
 

@@ -178,6 +178,11 @@ function setupEventListeners(elements) {
   // Refresh files
   if (elements.refreshFiles) {
     elements.refreshFiles.addEventListener('click', async () => {
+      if (!videoFolderHandle) {
+        showStatus('Please select a folder first', StatusType.ERROR, getStatusElement());
+        return;
+      }
+
       if (videoFolderHandle) {
         const hasPermission = await checkFolderPermission(videoFolderHandle);
         if (!hasPermission) {
@@ -381,46 +386,92 @@ async function handleUploadVideo(elements) {
   elements.progress.style.display = 'block';
 
   const uploadedUrls = [];
+  const CONCURRENCY_LIMIT = 2; // Upload 2 videos at a time (videos are larger)
   let successCount = 0;
   let failedCount = 0;
+  let completed = 0;
+  let sessionExpired = false;
 
   try {
-    for (let i = 0; i < filesToUpload.length; i++) {
-      const file = filesToUpload[i];
-      const currentIndex = i + 1;
-      const total = filesToUpload.length;
+    // Process files in batches with concurrency limit
+    for (let i = 0; i < filesToUpload.length; i += CONCURRENCY_LIMIT) {
+      if (sessionExpired) break;
 
-      updateProgress(i, total, `Uploading ${currentIndex}/${total}: ${file.name}...`, elements.progressFill, elements.progressText);
+      const batch = filesToUpload.slice(i, i + CONCURRENCY_LIMIT);
+      const currentBatchStart = i;
 
-      try {
-        const url = await uploadToGoogleDrive(file, data.googleDriveSessionId);
-        uploadedUrls.push(url);
-        successCount++;
+      const batchPromises = batch.map(async (file, batchIndex) => {
+        const fileIndex = currentBatchStart + batchIndex;
+        const currentIndex = fileIndex + 1;
+        const total = filesToUpload.length;
 
-        // Mark file as uploaded
-        uploadedVideoFiles.add(file.name);
+        try {
+          const url = await uploadToGoogleDrive(file, data.googleDriveSessionId);
 
-        // Add to history
-        await addToHistory('videoUploadHistory', {
-          fileName: file.name,
-          url: url,
-          timestamp: Date.now()
-        });
+          // Add to history
+          await addToHistory('videoUploadHistory', {
+            fileName: file.name,
+            url: url,
+            timestamp: Date.now()
+          });
 
-        await logInfo('Video upload completed', { file: file.name });
-      } catch (error) {
-        failedCount++;
-        await logErrorMessage(`Video upload failed for ${file.name}`, error);
+          await logInfo('Video upload completed', { file: file.name });
 
-        // Check for session expiry
-        if (error.message === 'GOOGLE_DRIVE_SESSION_EXPIRED') {
-          await setStorage({ googleDriveConnected: false });
-          await updateGDriveUI(elements);
-          showStatus('⚠️ Google Drive session expired. Please reconnect.', StatusType.ERROR, getStatusElement());
-          alert('⚠️ Google Drive session expired!\n\nPlease reconnect to Google Drive in Settings (⚙️) to continue uploading.');
-          break; // Stop uploading remaining files
+          return {
+            success: true,
+            url: url,
+            filename: file.name
+          };
+        } catch (error) {
+          await logErrorMessage(`Video upload failed for ${file.name}`, error);
+
+          // Check for session expiry
+          if (error.message === 'GOOGLE_DRIVE_SESSION_EXPIRED') {
+            throw error; // Re-throw to handle at batch level
+          }
+
+          return {
+            success: false,
+            error: error.message,
+            filename: file.name
+          };
+        }
+      });
+
+      // Wait for all uploads in the batch to complete
+      const batchResults = await Promise.allSettled(batchPromises);
+
+      for (let batchIndex = 0; batchIndex < batchResults.length; batchIndex++) {
+        const settledResult = batchResults[batchIndex];
+        const file = batch[batchIndex];
+        completed++;
+
+        updateProgress(completed - 1, filesToUpload.length, `Uploading ${completed}/${filesToUpload.length}: ${file.name}...`, elements.progressFill, elements.progressText);
+
+        if (settledResult.status === 'fulfilled') {
+          const result = settledResult.value;
+          if (result.success) {
+            uploadedUrls.push(result.url);
+            uploadedVideoFiles.add(result.filename);
+            successCount++;
+          } else {
+            failedCount++;
+          }
+        } else {
+          // Handle session expiry
+          if (settledResult.reason?.message === 'GOOGLE_DRIVE_SESSION_EXPIRED') {
+            sessionExpired = true;
+            await setStorage({ googleDriveConnected: false });
+            await updateGDriveUI(elements);
+            showStatus('⚠️ Google Drive session expired. Please reconnect.', StatusType.ERROR, getStatusElement());
+            alert('⚠️ Google Drive session expired!\n\nPlease reconnect to Google Drive in Settings (⚙️) to continue uploading.');
+            break;
+          }
+          failedCount++;
         }
       }
+
+      if (sessionExpired) break;
     }
 
     // Save uploaded files list

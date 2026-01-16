@@ -224,8 +224,8 @@ async function handleSaveApiKey(elements) {
   }
 
   const storageKey = host === 'vgy' ? 'vgyApiKey' :
-                     host === 'gyazo' ? 'gyazoAccessToken' :
-                     host === 'flickr' ? 'flickrApiKey' : null;
+    host === 'gyazo' ? 'gyazoAccessToken' :
+      host === 'flickr' ? 'flickrApiKey' : null;
 
   if (storageKey) {
     await setStorage({ [storageKey]: key }, 'sync');
@@ -377,7 +377,7 @@ async function validateServiceRequirements(host) {
 }
 
 /**
- * Processes multiple URLs for conversion
+ * Processes multiple URLs for conversion with parallel processing
  * @param {string[]} urls - URLs to process
  * @param {string} host - Target host
  * @param {Object} elements - DOM elements
@@ -386,49 +386,76 @@ async function validateServiceRequirements(host) {
 async function processUrls(urls, host, elements) {
   const results = [];
   const total = urls.length;
+  // Catbox is very sensitive to parallel requests - use sequential uploads
+  const CONCURRENCY_LIMIT = host === 'catbox' ? 1 : 3;
+  let completed = 0;
+  let sessionExpired = false;
 
-  for (let i = 0; i < urls.length; i++) {
-    const url = urls[i];
-    updateProgress(i, total, `Processing ${i + 1}/${total}...`, elements.progressFill, elements.progressText);
+  // Process URLs in batches with concurrency limit
+  for (let i = 0; i < urls.length; i += CONCURRENCY_LIMIT) {
+    if (sessionExpired) break;
 
-    try {
-      const result = await processUrl(url, host);
-      results.push(result);
+    const batch = urls.slice(i, i + CONCURRENCY_LIMIT);
+    const batchPromises = batch.map(async (url) => {
+      try {
+        const result = await processUrl(url, host);
 
-      // Save successful conversions to history
-      if (result.success && result.new !== result.original) {
-        await addToHistory('convertHistory', {
-          originalUrl: result.original,
-          convertedUrl: result.new,
-          service: host,
-          timestamp: Date.now()
+        // Save successful conversions to history
+        if (result.success && result.new !== result.original) {
+          await addToHistory('convertHistory', {
+            originalUrl: result.original,
+            convertedUrl: result.new,
+            service: host,
+            timestamp: Date.now()
+          });
+        }
+
+        return result;
+      } catch (error) {
+        if (error.message === 'GOOGLE_DRIVE_SESSION_EXPIRED') {
+          sessionExpired = true;
+          throw error;
+        }
+
+        return {
+          original: url,
+          new: url,
+          success: false,
+          error: error.message
+        };
+      }
+    });
+
+    // Wait for all promises in the batch to settle
+    const batchResults = await Promise.allSettled(batchPromises);
+
+    for (const settledResult of batchResults) {
+      completed++;
+      updateProgress(completed, total, `Processing ${completed}/${total}...`, elements.progressFill, elements.progressText);
+
+      if (settledResult.status === 'fulfilled') {
+        results.push(settledResult.value);
+      } else {
+        // Handle session expiry
+        if (settledResult.reason?.message === 'GOOGLE_DRIVE_SESSION_EXPIRED') {
+          await setStorage({ googleDriveConnected: false });
+          elements.progressSection.style.display = 'none';
+          elements.replaceBtn.disabled = false;
+          elements.convertSettingsPanel.style.display = 'block';
+          await updateApiUI(elements);
+          showStatus('⚠️ Google Drive session expired. Please reconnect in Settings.', StatusType.ERROR, elements.statusDiv);
+          alert('⚠️ Google Drive session expired!\n\nPlease reconnect to Google Drive in Settings (⚙️) to continue converting images.');
+          return results;
+        }
+
+        // Handle other errors
+        results.push({
+          original: batch[batchResults.indexOf(settledResult)],
+          new: batch[batchResults.indexOf(settledResult)],
+          success: false,
+          error: settledResult.reason?.message || 'Unknown error'
         });
       }
-    } catch (error) {
-      if (error.message === 'GOOGLE_DRIVE_SESSION_EXPIRED') {
-        // Mark as disconnected
-        await setStorage({ googleDriveConnected: false });
-
-        // Update UI
-        elements.progressSection.style.display = 'none';
-        elements.replaceBtn.disabled = false;
-
-        // Open settings panel and update Google Drive status
-        elements.convertSettingsPanel.style.display = 'block';
-        await updateApiUI(elements);
-
-        // Show alert
-        showStatus('⚠️ Google Drive session expired. Please reconnect in Settings.', StatusType.ERROR, elements.statusDiv);
-        alert('⚠️ Google Drive session expired!\n\nPlease reconnect to Google Drive in Settings (⚙️) to continue converting images.');
-        return results;
-      }
-
-      results.push({
-        original: url,
-        new: url,
-        success: false,
-        error: error.message
-      });
     }
   }
 
@@ -611,8 +638,8 @@ async function renderConvertHistory(elements) {
   const html = history.map(item => {
     const date = formatDate(item.timestamp);
     const serviceName = item.service === 'catbox' ? 'Catbox.moe' :
-                       item.service === 'gdrive' ? 'Google Drive' :
-                       item.service === 'vgy' ? 'vgy.me' : item.service;
+      item.service === 'gdrive' ? 'Google Drive' :
+        item.service === 'vgy' ? 'vgy.me' : item.service;
 
     return `
       <div class="history-item" style="padding: 12px; margin-bottom: 8px; background: var(--bg-secondary); border: 1px solid var(--border-light); border-radius: 6px;">
