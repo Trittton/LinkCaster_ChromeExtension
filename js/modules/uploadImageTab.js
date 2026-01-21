@@ -205,6 +205,20 @@ function setupEventListeners(elements) {
     });
   }
 
+  // Select All button
+  if (elements.selectAllBtn) {
+    elements.selectAllBtn.addEventListener('click', () => {
+      const checkboxes = elements.fileList.querySelectorAll('.file-checkbox:not(:disabled)');
+      checkboxes.forEach(cb => cb.checked = true);
+      const count = checkboxes.length;
+      if (count > 0) {
+        showStatus(`Selected ${count} file(s)`, StatusType.SUCCESS, getStatusElement());
+      } else {
+        showStatus('No files available to select', StatusType.WARNING, getStatusElement());
+      }
+    });
+  }
+
   // Upload button
   if (elements.uploadBtn) {
     elements.uploadBtn.addEventListener('click', () => handleUploadImages(elements));
@@ -469,7 +483,8 @@ async function handleUploadImages(elements) {
       }
     }
 
-    elements.outputText.value = urls.join('\n');
+    // Reverse so older uploads appear first, newer at the end
+    elements.outputText.value = urls.reverse().join('\n');
     elements.outputSection.style.display = 'block';
 
     // Mark files as uploaded
@@ -639,6 +654,7 @@ function getElements() {
     detectedFiles: document.getElementById('image-detected-files'),
     fileList: document.getElementById('image-file-list'),
     refreshFiles: document.getElementById('image-refresh-files'),
+    selectAllBtn: document.getElementById('image-select-all'),
     fileInput: document.getElementById('image-file-input'),
     uploadBtn: document.getElementById('upload-images-btn'),
     progress: document.getElementById('image-progress'),

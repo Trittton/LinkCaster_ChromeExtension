@@ -51,14 +51,40 @@ export async function downloadImage(url) {
 }
 
 /**
- * Gets direct image URL from page (handles Lightshot, etc.)
+ * Gets direct image URL from page (handles Lightshot, iCloud, etc.)
  * @param {string} url - Page or image URL
  * @returns {Promise<string>} Direct image URL
  */
 export async function getDirectImageUrl(url) {
   // If already a direct image link, return it
-  if (/\.(jpg|jpeg|png|gif|bmp|webp)(\?.*)?$/i.test(url)) {
+  if (/\.(jpg|jpeg|png|gif|bmp|webp|mp4|mov|m4v)(\?.*)?$/i.test(url)) {
     return url;
+  }
+
+  // Handle iCloud shared photo/video links via backend
+  // Apple's iCloud Photo Links require server-side processing
+  if (url.includes('share.icloud.com') || url.includes('icloud.com/photos')) {
+    return await withErrorLogging(async () => {
+      console.log('[DEBUG] Processing iCloud URL via backend:', url);
+
+      try {
+        const response = await chrome.runtime.sendMessage({
+          action: 'extractICloudMedia',
+          url: url
+        });
+
+        if (response && response.success && response.mediaUrl) {
+          console.log('[DEBUG] Successfully extracted iCloud media URL:', response.mediaUrl);
+          return response.mediaUrl;
+        } else {
+          const errorMsg = response?.error || 'Could not extract media from iCloud link';
+          throw new Error(errorMsg);
+        }
+      } catch (error) {
+        console.error('[DEBUG] iCloud extraction failed:', error.message);
+        throw new Error('iCloud Photo Links are not supported. Please download the image first and use the Upload Img tab.');
+      }
+    }, 'getDirectImageUrl - iCloud')();
   }
 
   // Handle Lightshot/prnt.sc URLs
@@ -350,7 +376,19 @@ export async function uploadToGoogleDrive(file, sessionId) {
       await logInfo('Google Drive upload successful', { url: response.url });
       return response.url;
     } else {
-      if (response.error && (response.error.includes('Unauthorized') || response.error.includes('Invalid session'))) {
+      // Check for auth-related errors that indicate session expiry
+      const authErrors = [
+        'Unauthorized',
+        'Invalid session',
+        'Token expired',
+        'refresh failed',
+        'reconnect to Google Drive'
+      ];
+      const isAuthError = response.error && authErrors.some(err =>
+        response.error.toLowerCase().includes(err.toLowerCase())
+      );
+
+      if (isAuthError) {
         await getStorage(['googleDriveConnected']).then(() =>
           setStorage({ googleDriveConnected: false })
         );

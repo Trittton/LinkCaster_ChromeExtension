@@ -161,9 +161,9 @@ export function createFileItemHtml(fileInfo, wasChecked = false) {
   let uploadedBadge = '';
   if (fileInfo.uploaded) {
     if (fileInfo.url) {
-      uploadedBadge = `<a href="${sanitizeHtml(fileInfo.url)}" target="_blank" class="uploaded-badge-link" style="color: #38ef7d; font-size: 10px; margin-left: 8px; text-decoration: none; cursor: pointer; transition: opacity 0.2s;" onmouseover="this.style.opacity='0.7'" onmouseout="this.style.opacity='1'" title="Click to open uploaded file">✓ Uploaded</a>`;
+      uploadedBadge = `<a href="${sanitizeHtml(fileInfo.url)}" target="_blank" class="uploaded-badge-link" title="Click to open uploaded file">✓ Uploaded</a>`;
     } else {
-      uploadedBadge = '<span style="color: #38ef7d; font-size: 10px; margin-left: 8px;">✓ Uploaded</span>';
+      uploadedBadge = '<span class="uploaded-badge">✓ Uploaded</span>';
     }
   }
 

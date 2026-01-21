@@ -1,6 +1,9 @@
 // Background service worker for the extension
 // Handles OAuth and API interactions that require signing
 
+// Token refresh lock to prevent race conditions during parallel uploads
+let tokenRefreshPromise = null;
+
 chrome.runtime.onInstalled.addListener(() => {
   console.log('Image Link Converter extension installed');
 
@@ -371,6 +374,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
   }
+
+  if (request.action === 'extractICloudMedia') {
+    extractICloudMedia(request.url)
+      .then(result => sendResponse(result))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
 });
 
 async function handleGoogleDriveOAuth() {
@@ -446,46 +456,180 @@ async function verifyGoogleDriveSession(sessionId) {
 }
 
 // Refresh Google Drive access token using refresh token
+// Uses a lock to prevent race conditions when multiple uploads happen in parallel
 async function refreshGoogleDriveToken() {
+  // If a refresh is already in progress, wait for it instead of starting a new one
+  if (tokenRefreshPromise) {
+    console.log('Token refresh already in progress, waiting for it to complete...');
+    return await tokenRefreshPromise;
+  }
+
+  // Create and store the refresh promise
+  tokenRefreshPromise = doTokenRefresh();
+
   try {
-    console.log('Refreshing Google Drive access token...');
+    const result = await tokenRefreshPromise;
+    return result;
+  } finally {
+    // Clear the promise when done (success or failure)
+    tokenRefreshPromise = null;
+  }
+}
 
-    const storage = await chrome.storage.local.get(['googleDriveRefreshToken']);
+// Actual token refresh implementation
+async function doTokenRefresh() {
+  const MAX_RETRIES = 3;
+  const RETRY_DELAY = 1000; // 1 second
 
-    if (!storage.googleDriveRefreshToken) {
-      throw new Error('No refresh token available. Please reconnect to Google Drive.');
+  const storage = await chrome.storage.local.get(['googleDriveRefreshToken']);
+
+  if (!storage.googleDriveRefreshToken) {
+    throw new Error('No refresh token available. Please reconnect to Google Drive.');
+  }
+
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      console.log(`Refreshing Google Drive access token (attempt ${attempt}/${MAX_RETRIES})...`);
+
+      // Use backend to refresh token (backend has client secret)
+      const response = await fetch(`${BACKEND_URL}/api/refresh-token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          refresh_token: storage.googleDriveRefreshToken
+        })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`Token refresh attempt ${attempt} failed:`, response.status, errorText);
+        throw new Error(`Token refresh failed: ${response.status}`);
+      }
+
+      const tokenData = await response.json();
+
+      if (!tokenData.access_token) {
+        throw new Error('No access token in refresh response');
+      }
+
+      // Update stored tokens
+      await chrome.storage.local.set({
+        googleDriveAccessToken: tokenData.access_token,
+        googleDriveTokenExpiry: Date.now() + (tokenData.expires_in * 1000)
+      });
+
+      console.log('Access token refreshed successfully');
+      return tokenData.access_token;
+    } catch (error) {
+      lastError = error;
+      console.error(`Token refresh attempt ${attempt} error:`, error.message);
+
+      if (attempt < MAX_RETRIES) {
+        console.log(`Retrying in ${RETRY_DELAY}ms...`);
+        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+      }
+    }
+  }
+
+  console.error('All token refresh attempts failed');
+  throw lastError || new Error('Token refresh failed after multiple attempts');
+}
+
+// Helper function to find or create a folder in Google Drive
+async function findOrCreateFolder(accessToken, folderName, parentId = null) {
+  try {
+    // Search for existing folder
+    let query = `name='${folderName}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
+    if (parentId) {
+      query += ` and '${parentId}' in parents`;
+    } else {
+      query += ` and 'root' in parents`;
     }
 
-    // Use backend to refresh token (backend has client secret)
-    const response = await fetch(`${BACKEND_URL}/api/refresh-token`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        refresh_token: storage.googleDriveRefreshToken
-      })
-    });
+    const searchResponse = await fetch(
+      `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name)`,
+      {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`
+        }
+      }
+    );
 
-    if (!response.ok) {
-      throw new Error('Token refresh failed');
+    if (!searchResponse.ok) {
+      console.error('Folder search failed:', await searchResponse.text());
+      return null;
     }
 
-    const tokenData = await response.json();
+    const searchData = await searchResponse.json();
 
-    if (!tokenData.access_token) {
-      throw new Error('No access token in refresh response');
+    if (searchData.files && searchData.files.length > 0) {
+      console.log(`Found existing folder: ${folderName} (${searchData.files[0].id})`);
+      return searchData.files[0].id;
     }
 
-    // Update stored tokens
-    await chrome.storage.local.set({
-      googleDriveAccessToken: tokenData.access_token,
-      googleDriveTokenExpiry: Date.now() + (tokenData.expires_in * 1000)
-    });
+    // Create folder if not found
+    console.log(`Creating folder: ${folderName}`);
+    const metadata = {
+      name: folderName,
+      mimeType: 'application/vnd.google-apps.folder'
+    };
 
-    console.log('Access token refreshed successfully');
-    return tokenData.access_token;
+    if (parentId) {
+      metadata.parents = [parentId];
+    }
+
+    const createResponse = await fetch(
+      'https://www.googleapis.com/drive/v3/files',
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(metadata)
+      }
+    );
+
+    if (!createResponse.ok) {
+      console.error('Folder creation failed:', await createResponse.text());
+      return null;
+    }
+
+    const createData = await createResponse.json();
+    console.log(`Created folder: ${folderName} (${createData.id})`);
+    return createData.id;
   } catch (error) {
-    console.error('Token refresh error:', error);
-    throw error;
+    console.error('findOrCreateFolder error:', error);
+    return null;
+  }
+}
+
+// Get or create the LinkCaster folder structure
+async function getUploadFolderId(accessToken, fileType) {
+  try {
+    // First, find or create LinkCaster_Content folder
+    const mainFolderId = await findOrCreateFolder(accessToken, 'LinkCaster_Content');
+    if (!mainFolderId) {
+      console.log('Could not create main folder, uploading to root');
+      return null;
+    }
+
+    // Determine subfolder based on file type
+    const subfolderName = fileType.startsWith('video/') ? 'Videos' : 'Images';
+
+    // Find or create the subfolder
+    const subfolderId = await findOrCreateFolder(accessToken, subfolderName, mainFolderId);
+    if (!subfolderId) {
+      console.log('Could not create subfolder, uploading to main folder');
+      return mainFolderId;
+    }
+
+    return subfolderId;
+  } catch (error) {
+    console.error('getUploadFolderId error:', error);
+    return null;
   }
 }
 
@@ -539,11 +683,20 @@ async function handleGoogleDriveUpload(fileData, fileName, sessionId) {
     }
     const blob = new Blob([bytes], { type: mimeType });
 
+    // Get the folder to upload to (LinkCaster_Content/Images or Videos)
+    const folderId = await getUploadFolderId(storage.googleDriveAccessToken, mimeType);
+
     // Prepare multipart upload
     const metadata = {
       name: fileName,
       mimeType: mimeType
     };
+
+    // If we have a folder ID, set the parent
+    if (folderId) {
+      metadata.parents = [folderId];
+      console.log(`Uploading to folder: ${folderId}`);
+    }
 
     const boundary = '-------314159265358979323846';
     const delimiter = "\r\n--" + boundary + "\r\n";
@@ -784,6 +937,391 @@ async function extractLightshotImage(url) {
 
   } catch (error) {
     console.error('[Background] Lightshot extraction error:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+// ===== iCloud Media Extraction =====
+
+async function extractICloudMedia(url) {
+  try {
+    console.log('[Background] Extracting media from iCloud URL:', url);
+
+    // Extract token from URL
+    // Patterns:
+    // - https://share.icloud.com/photos/TOKEN (redirects to icloud.com/photos/#TOKEN)
+    // - https://www.icloud.com/photos/#TOKEN
+    // - https://www.icloud.com/photos/#/icloudlinks/TOKEN/
+    // - https://www.icloud.com/sharedalbum/#TOKEN
+    let token = null;
+    let resolvedUrl = url;
+
+    // First, if it's a share.icloud.com URL, we need to follow the redirect
+    if (url.includes('share.icloud.com')) {
+      try {
+        console.log('[Background] Following share.icloud.com redirect...');
+        const redirectResponse = await fetch(url, {
+          method: 'HEAD',
+          redirect: 'manual'
+        });
+
+        // Check for redirect location
+        const location = redirectResponse.headers.get('Location');
+        if (location) {
+          resolvedUrl = location;
+          console.log('[Background] Redirected to:', resolvedUrl);
+        } else {
+          // Try GET request if HEAD didn't work
+          const getResponse = await fetch(url, { redirect: 'follow' });
+          resolvedUrl = getResponse.url;
+          console.log('[Background] Followed redirect to:', resolvedUrl);
+        }
+      } catch (redirectError) {
+        console.log('[Background] Redirect follow failed, trying token extraction from original URL');
+      }
+    }
+
+    // Try share.icloud.com/photos/TOKEN pattern
+    const shareIcloudMatch = resolvedUrl.match(/share\.icloud\.com\/photos\/([A-Za-z0-9_-]+)/);
+    if (shareIcloudMatch) {
+      token = shareIcloudMatch[1];
+      console.log('[Background] Extracted share.icloud.com token:', token);
+    }
+
+    // Try icloud.com/photos/#TOKEN pattern (direct token after hash)
+    if (!token) {
+      const photosHashMatch = resolvedUrl.match(/icloud\.com\/photos\/#([A-Za-z0-9_-]+)/);
+      if (photosHashMatch) {
+        token = photosHashMatch[1];
+        console.log('[Background] Extracted icloud.com/photos/# token:', token);
+      }
+    }
+
+    // Try icloudlinks pattern
+    if (!token) {
+      const icloudLinksMatch = resolvedUrl.match(/icloudlinks\/([A-Za-z0-9_-]+)/);
+      if (icloudLinksMatch) {
+        token = icloudLinksMatch[1];
+        console.log('[Background] Extracted iCloud Links token:', token);
+      }
+    }
+
+    // Try shared album pattern
+    if (!token) {
+      const sharedAlbumMatch = resolvedUrl.match(/sharedalbum\/#([A-Za-z0-9]+)/);
+      if (sharedAlbumMatch) {
+        token = sharedAlbumMatch[1];
+        console.log('[Background] Extracted Shared Album token:', token);
+      }
+    }
+
+    // Try generic hash pattern as last resort
+    if (!token) {
+      const hashMatch = resolvedUrl.match(/#([A-Za-z0-9_-]+)/);
+      if (hashMatch) {
+        token = hashMatch[1];
+        console.log('[Background] Extracted generic token:', token);
+      }
+    }
+
+    // Also try from original URL if nothing found
+    if (!token && url !== resolvedUrl) {
+      const origMatch = url.match(/\/photos\/([A-Za-z0-9_-]+)/);
+      if (origMatch) {
+        token = origMatch[1];
+        console.log('[Background] Extracted token from original URL path:', token);
+      }
+    }
+
+    if (!token) {
+      throw new Error('Could not extract token from iCloud URL');
+    }
+
+    // APPROACH 0: Try backend server with headless browser (most reliable)
+    try {
+      console.log('[Background] Trying backend API for iCloud extraction...');
+      const apiResponse = await fetch(`${BACKEND_URL}/api/extract-icloud`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ url: url, token: token }),
+        signal: AbortSignal.timeout(30000) // 30 second timeout for headless browser
+      });
+
+      if (apiResponse.ok) {
+        const data = await apiResponse.json();
+        if (data.success && data.imageUrl) {
+          console.log('[Background] Backend extracted iCloud image URL:', data.imageUrl);
+          return { success: true, mediaUrl: data.imageUrl };
+        }
+      }
+      console.log('[Background] Backend iCloud extraction not available or failed');
+    } catch (backendError) {
+      console.log('[Background] Backend API for iCloud not available:', backendError.message);
+    }
+
+    // APPROACH 1: Fetch the share.icloud.com page and extract og:image meta tag
+    // iCloud Photo Links include a preview image in the meta tags
+    try {
+      console.log('[Background] Trying to fetch iCloud page for meta tags...');
+
+      const pageUrl = url.includes('share.icloud.com') ? url : `https://share.icloud.com/photos/${token}`;
+      const pageResponse = await fetch(pageUrl, {
+        method: 'GET',
+        headers: {
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        },
+        redirect: 'follow'
+      });
+
+      if (pageResponse.ok) {
+        const html = await pageResponse.text();
+        console.log('[Background] Got iCloud page HTML, length:', html.length);
+        console.log('[Background] HTML preview:', html.substring(0, 1500));
+
+        // Try to extract og:image meta tag
+        const ogImagePatterns = [
+          /property="og:image"\s+content="([^"]+)"/i,
+          /content="([^"]+)"\s+property="og:image"/i,
+          /property='og:image'\s+content='([^']+)'/i,
+          /content='([^']+)'\s+property='og:image'/i,
+          /name="twitter:image"\s+content="([^"]+)"/i,
+          /content="([^"]+)"\s+name="twitter:image"/i
+        ];
+
+        for (const pattern of ogImagePatterns) {
+          const match = html.match(pattern);
+          if (match && match[1]) {
+            let imageUrl = match[1];
+            // Decode HTML entities
+            imageUrl = imageUrl.replace(/&amp;/g, '&');
+            console.log('[Background] Found og:image URL:', imageUrl);
+            return { success: true, mediaUrl: imageUrl };
+          }
+        }
+
+        // Try to find any image URL in the page
+        const imgPatterns = [
+          /"(https:\/\/[^"]+\.(?:jpg|jpeg|png|gif|heic|webp)[^"]*)"/gi,
+          /'(https:\/\/[^']+\.(?:jpg|jpeg|png|gif|heic|webp)[^']*)'/gi,
+          /(https:\/\/cvws\.icloud-content\.com[^"'\s]+)/gi,
+          /(https:\/\/[^"'\s]*icloud[^"'\s]*\.(?:jpg|jpeg|png|gif|heic|webp|mov|mp4)[^"'\s]*)/gi
+        ];
+
+        for (const pattern of imgPatterns) {
+          const matches = html.matchAll(pattern);
+          for (const match of matches) {
+            if (match[1] && !match[1].includes('favicon') && !match[1].includes('icon')) {
+              let imageUrl = match[1].replace(/&amp;/g, '&');
+              console.log('[Background] Found image URL in page:', imageUrl);
+              return { success: true, mediaUrl: imageUrl };
+            }
+          }
+        }
+      }
+    } catch (pageError) {
+      console.log('[Background] Page fetch failed:', pageError.message);
+    }
+
+    // APPROACH 2: Try the cvws (content viewing web service) API
+    try {
+      console.log('[Background] Trying cvws API for iCloud Photo Link...');
+
+      const cvwsResponse = await fetch(`https://cvws.icloud-content.com/B/${token}/download`, {
+        method: 'GET',
+        headers: {
+          'Accept': '*/*',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        },
+        redirect: 'follow'
+      });
+
+      console.log('[Background] cvws response status:', cvwsResponse.status);
+      console.log('[Background] cvws response URL:', cvwsResponse.url);
+
+      if (cvwsResponse.ok) {
+        const contentType = cvwsResponse.headers.get('content-type');
+        if (contentType && (contentType.includes('image') || contentType.includes('video'))) {
+          console.log('[Background] Got direct media from cvws API');
+          return { success: true, mediaUrl: cvwsResponse.url };
+        }
+      }
+
+      if (cvwsResponse.url && cvwsResponse.url !== `https://cvws.icloud-content.com/B/${token}/download`) {
+        console.log('[Background] cvws redirected to:', cvwsResponse.url);
+        return { success: true, mediaUrl: cvwsResponse.url };
+      }
+    } catch (cvwsError) {
+      console.log('[Background] cvws API failed:', cvwsError.message);
+    }
+
+    // APPROACH 3: Try iCloud Photos web API with different endpoints
+    try {
+      console.log('[Background] Trying iCloud Photos web API...');
+
+      const endpoints = [
+        `https://www.icloud.com/sharedstreams/${token}/en_US/`,
+        `https://p23-sharedstreams.icloud.com/${token}/sharedstreams/webstream`
+      ];
+
+      for (const endpoint of endpoints) {
+        try {
+          const response = await fetch(endpoint, {
+            method: endpoint.includes('webstream') ? 'POST' : 'GET',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json, text/html, */*',
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            },
+            body: endpoint.includes('webstream') ? JSON.stringify({ streamCtag: null }) : undefined
+          });
+
+          if (response.ok) {
+            const text = await response.text();
+            console.log('[Background] Endpoint response:', text.substring(0, 500));
+
+            const urlMatch = text.match(/https?:\/\/[^"'\s]+\.(jpg|jpeg|png|gif|heic|mov|mp4)[^"'\s]*/i);
+            if (urlMatch) {
+              console.log('[Background] Extracted media URL:', urlMatch[0]);
+              return { success: true, mediaUrl: urlMatch[0] };
+            }
+          }
+        } catch (e) {
+          console.log('[Background] Endpoint failed:', endpoint, e.message);
+        }
+      }
+    } catch (photosApiError) {
+      console.log('[Background] Photos web API failed:', photosApiError.message);
+    }
+
+    // APPROACH 3: Try multiple iCloud partition servers (sharedstreams API)
+    // This works for iCloud Shared Albums
+    const partitions = ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10',
+                        '11', '12', '13', '14', '15', '16', '17', '18', '19', '20',
+                        '21', '22', '23', '24', '25', '26', '27', '28', '29', '30',
+                        '31', '32', '33', '34', '35', '36', '37', '38', '39', '40',
+                        '41', '42', '43', '44', '45', '46', '47', '48', '49', '50',
+                        '51', '52', '53', '54', '55', '56', '57', '58', '59', '60',
+                        '61', '62', '63', '64', '65', '66', '67', '68', '69', '70'];
+
+    let webstreamData = null;
+    let workingBaseUrl = null;
+
+    for (const partition of partitions) {
+      const baseUrl = `https://p${partition}-sharedstreams.icloud.com/${token}/sharedstreams`;
+
+      try {
+        console.log(`[Background] Trying iCloud partition p${partition}...`);
+
+        const webstreamResponse = await fetch(`${baseUrl}/webstream`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify({ streamCtag: null })
+        });
+
+        if (webstreamResponse.ok) {
+          webstreamData = await webstreamResponse.json();
+
+          // Check if we got redirected to a different host
+          const redirectHost = webstreamResponse.headers.get('X-Apple-MMe-Host');
+          if (redirectHost) {
+            workingBaseUrl = `https://${redirectHost}/${token}/sharedstreams`;
+            console.log('[Background] Redirected to:', workingBaseUrl);
+          } else {
+            workingBaseUrl = baseUrl;
+          }
+
+          console.log('[Background] Found working partition:', partition);
+          break;
+        }
+      } catch (partitionError) {
+        console.log(`[Background] Partition p${partition} failed:`, partitionError.message);
+      }
+    }
+
+    if (!webstreamData || !workingBaseUrl) {
+      throw new Error('Could not connect to iCloud servers. The link may be invalid or expired.');
+    }
+
+    console.log('[Background] Webstream data:', JSON.stringify(webstreamData).substring(0, 500));
+
+    // Extract photo GUIDs from webstream
+    const photos = webstreamData.photos || [];
+    if (photos.length === 0) {
+      throw new Error('No photos found in iCloud link');
+    }
+
+    // Get the first photo (for single image links)
+    const photo = photos[0];
+    const photoGuid = photo.photoGuid;
+
+    if (!photoGuid) {
+      throw new Error('Could not extract photo identifier');
+    }
+
+    console.log('[Background] Photo GUID:', photoGuid);
+
+    // Get asset URLs
+    const assetUrlsResponse = await fetch(`${workingBaseUrl}/webasseturls`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({ photoGuids: [photoGuid] })
+    });
+
+    if (!assetUrlsResponse.ok) {
+      throw new Error('Failed to get asset URLs from iCloud');
+    }
+
+    const assetUrlsData = await assetUrlsResponse.json();
+    console.log('[Background] Asset URLs data:', JSON.stringify(assetUrlsData).substring(0, 500));
+
+    // Find the best quality asset
+    const items = assetUrlsData.items || {};
+    let bestAsset = null;
+    let maxSize = 0;
+
+    // Get derivatives from the photo to find the best quality
+    const derivatives = photo.derivatives || {};
+
+    for (const [key, derivative] of Object.entries(derivatives)) {
+      const checksum = derivative.checksum;
+      if (checksum && items[checksum]) {
+        const fileSize = parseInt(derivative.fileSize) || 0;
+        if (fileSize > maxSize) {
+          maxSize = fileSize;
+          bestAsset = items[checksum];
+        }
+      }
+    }
+
+    // If no derivative matched, try to get any asset
+    if (!bestAsset) {
+      const assetKeys = Object.keys(items);
+      if (assetKeys.length > 0) {
+        bestAsset = items[assetKeys[0]];
+      }
+    }
+
+    if (!bestAsset || !bestAsset.url_location || !bestAsset.url_path) {
+      throw new Error('Could not find downloadable asset URL');
+    }
+
+    // Construct the final URL
+    const mediaUrl = `https://${bestAsset.url_location}${bestAsset.url_path}`;
+    console.log('[Background] Extracted iCloud media URL:', mediaUrl);
+
+    return { success: true, mediaUrl: mediaUrl };
+
+  } catch (error) {
+    console.error('[Background] iCloud extraction error:', error);
     return { success: false, error: error.message };
   }
 }

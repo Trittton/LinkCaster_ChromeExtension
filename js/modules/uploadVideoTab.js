@@ -200,6 +200,20 @@ function setupEventListeners(elements) {
     });
   }
 
+  // Select All button
+  if (elements.selectAllBtn) {
+    elements.selectAllBtn.addEventListener('click', () => {
+      const checkboxes = elements.fileList.querySelectorAll('.file-checkbox:not(:disabled)');
+      checkboxes.forEach(cb => cb.checked = true);
+      const count = checkboxes.length;
+      if (count > 0) {
+        showStatus(`Selected ${count} file(s)`, StatusType.SUCCESS, getStatusElement());
+      } else {
+        showStatus('No files available to select', StatusType.WARNING, getStatusElement());
+      }
+    });
+  }
+
   // Time filter change
   if (elements.timeFilter) {
     elements.timeFilter.addEventListener('change', async () => {
@@ -479,7 +493,8 @@ async function handleUploadVideo(elements) {
 
     // Show results
     if (uploadedUrls.length > 0) {
-      elements.outputText.value = uploadedUrls.join('\n');
+      // Reverse so older uploads appear first, newer at the end
+      elements.outputText.value = uploadedUrls.reverse().join('\n');
       elements.outputSection.style.display = 'block';
     }
 
@@ -659,6 +674,7 @@ function getElements() {
     detectedFiles: document.getElementById('video-detected-files'),
     fileList: document.getElementById('video-file-list'),
     refreshFiles: document.getElementById('video-refresh-files'),
+    selectAllBtn: document.getElementById('video-select-all'),
     fileInput: document.getElementById('video-file-input'),
     uploadBtn: document.getElementById('upload-video-btn'),
     progress: document.getElementById('video-progress'),

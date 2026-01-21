@@ -160,7 +160,10 @@
         <div id="image-detected-files" style="display: none; margin-bottom: 12px;">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
             <label style="margin: 0;">Detected Files</label>
-            <button id="image-refresh-files" class="secondary" style="font-size: 11px; padding: 4px 8px;">Refresh</button>
+            <div style="display: flex; gap: 4px;">
+              <button id="image-select-all" class="secondary" style="font-size: 11px; padding: 4px 8px;">Select All</button>
+              <button id="image-refresh-files" class="secondary" style="font-size: 11px; padding: 4px 8px;">Refresh</button>
+            </div>
           </div>
           <div id="image-file-list" style="max-height: 200px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 4px; padding: 8px;">
             <p style="text-align: center; color: var(--text-dimmed); font-size: 12px; padding: 20px;">No files detected</p>
@@ -251,7 +254,10 @@
           <div id="video-detected-files" style="margin-bottom: 12px;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
               <label style="margin: 0;">Detected Files</label>
-              <button id="video-refresh-files" class="secondary" style="font-size: 11px; padding: 4px 8px;">Refresh</button>
+              <div style="display: flex; gap: 4px;">
+                <button id="video-select-all" class="secondary" style="font-size: 11px; padding: 4px 8px;">Select All</button>
+                <button id="video-refresh-files" class="secondary" style="font-size: 11px; padding: 4px 8px;">Refresh</button>
+              </div>
             </div>
             <div id="video-file-list" style="max-height: 200px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 4px; padding: 8px;">
               <p style="text-align: center; color: var(--text-dimmed); font-size: 12px; padding: 20px;">No files detected</p>
