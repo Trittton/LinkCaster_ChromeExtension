@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Privacy Policy for LinkCaster Chrome Extension - Learn how we handle your data.">
+    <title>Privacy Policy - LinkCaster</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #0f0f14;
+            --bg-secondary: #1a1a24;
+            --bg-card: #22222e;
+            --text-primary: #f4f4f5;
+            --text-secondary: #a1a1aa;
+            --accent: #6366f1;
+            --accent-light: #818cf8;
+            --success: #22c55e;
+            --danger: #ef4444;
+            --border: #2e2e3a;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.7;
+            min-height: 100vh;
+        }
+
+        .background-gradient {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 600px;
+            background: radial-gradient(ellipse 80% 50% at 50% -20%, rgba(99, 102, 241, 0.15), transparent);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .container {
+            position: relative;
+            z-index: 1;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 60px 24px;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 60px;
+        }
+
+        .logo {
+            display: inline-flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+
+        .logo-icon {
+            width: 48px;
+            height: 48px;
+            background: linear-gradient(135deg, var(--accent), var(--accent-light));
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+        }
+
+        .logo-text {
+            font-size: 28px;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--text-primary), var(--text-secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        h1 {
+            font-size: 42px;
+            font-weight: 700;
+            margin-bottom: 16px;
+            letter-spacing: -0.02em;
+        }
+
+        .subtitle {
+            color: var(--text-secondary);
+            font-size: 18px;
+        }
+
+        .last-updated {
+            display: inline-block;
+            margin-top: 16px;
+            padding: 8px 16px;
+            background: var(--bg-secondary);
+            border-radius: 20px;
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 32px;
+            margin-bottom: 24px;
+        }
+
+        h2 {
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        h2 .icon {
+            font-size: 28px;
+        }
+
+        h3 {
+            font-size: 18px;
+            font-weight: 600;
+            margin: 24px 0 12px 0;
+            color: var(--accent-light);
+        }
+
+        p {
+            color: var(--text-secondary);
+            margin-bottom: 16px;
+        }
+
+        .highlight-box {
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(129, 140, 248, 0.05));
+            border: 1px solid rgba(99, 102, 241, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 20px 0;
+        }
+
+        .highlight-box p {
+            color: var(--text-primary);
+            font-weight: 500;
+            margin: 0;
+            font-size: 17px;
+        }
+
+        .list {
+            list-style: none;
+            margin: 16px 0;
+        }
+
+        .list li {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            margin-bottom: 12px;
+            color: var(--text-secondary);
+        }
+
+        .list li .check {
+            color: var(--success);
+            font-size: 18px;
+            flex-shrink: 0;
+        }
+
+        .list li .cross {
+            color: var(--danger);
+            font-size: 18px;
+            flex-shrink: 0;
+        }
+
+        .permissions-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+
+        .permissions-table th,
+        .permissions-table td {
+            text-align: left;
+            padding: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .permissions-table th {
+            color: var(--text-primary);
+            font-weight: 600;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .permissions-table td {
+            color: var(--text-secondary);
+        }
+
+        .permissions-table td:first-child {
+            color: var(--accent-light);
+            font-family: 'Fira Code', monospace;
+            font-size: 14px;
+        }
+
+        .permissions-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .service-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            font-size: 14px;
+            color: var(--text-primary);
+            margin: 4px 4px 4px 0;
+        }
+
+        .summary-box {
+            background: linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(34, 197, 94, 0.05));
+            border: 1px solid rgba(34, 197, 94, 0.3);
+            border-radius: 12px;
+            padding: 24px;
+            text-align: center;
+        }
+
+        .summary-box p {
+            color: var(--text-primary);
+            font-size: 17px;
+            margin: 0;
+        }
+
+        footer {
+            text-align: center;
+            padding: 40px 0;
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+
+        footer a {
+            color: var(--accent-light);
+            text-decoration: none;
+        }
+
+        footer a:hover {
+            text-decoration: underline;
+        }
+
+        @media (max-width: 640px) {
+            .container {
+                padding: 40px 16px;
+            }
+
+            h1 {
+                font-size: 32px;
+            }
+
+            .card {
+                padding: 24px;
+            }
+
+            h2 {
+                font-size: 20px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="background-gradient"></div>
+
+    <div class="container">
+        <header>
+            <div class="logo">
+                <div class="logo-icon">🔗</div>
+                <span class="logo-text">LinkCaster</span>
+            </div>
+            <h1>Privacy Policy</h1>
+            <p class="subtitle">How we handle your data</p>
+            <span class="last-updated">Last Updated: February 3, 2026</span>
+        </header>
+
+        <div class="card">
+            <h2><span class="icon">🎯</span> Overview</h2>
+            <p>LinkCaster is a Chrome browser extension that helps users convert image links and upload files to cloud
+                storage services.</p>
+
+            <div class="highlight-box">
+                <p>🛡️ LinkCaster does not collect, store, or transmit any personal data to our servers. All processing
+                    happens locally in your browser.</p>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">🚫</span> What We DON'T Do</h2>
+            <ul class="list">
+                <li><span class="cross">✕</span> We do not collect personal information</li>
+                <li><span class="cross">✕</span> We do not track your browsing activity</li>
+                <li><span class="cross">✕</span> We do not use analytics or telemetry</li>
+                <li><span class="cross">✕</span> We do not sell or share any data with third parties</li>
+                <li><span class="cross">✕</span> We do not store your data on external servers</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">✅</span> What We DO</h2>
+            <ul class="list">
+                <li><span class="check">✓</span> Process image and video links locally in your browser</li>
+                <li><span class="check">✓</span> Store your preferences (like API keys) locally using Chrome's Storage
+                    API</li>
+                <li><span class="check">✓</span> Communicate directly with third-party services when you explicitly
+                    request uploads</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">☁️</span> Third-Party Services</h2>
+            <p>When you choose to upload files, LinkCaster communicates directly with the following services:</p>
+
+            <div style="margin: 20px 0;">
+                <span class="service-badge">📁 Google Drive</span>
+                <span class="service-badge">📦 Catbox.moe</span>
+                <span class="service-badge">🖼️ vgy.me</span>
+            </div>
+
+            <h3>Google Drive</h3>
+            <p>When you connect your Google account, we use OAuth 2.0 for secure authentication. We only request
+                permission to create and manage files in a dedicated "LinkCaster" folder. Your Google credentials are
+                never stored by us; tokens are managed locally by Chrome.</p>
+
+            <h3>Catbox.moe & vgy.me</h3>
+            <p>Files are uploaded directly to these services' servers. Your API keys are stored locally in your browser.
+                Each service's own privacy policy applies to uploaded content.</p>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">💾</span> Local Storage</h2>
+            <p>LinkCaster stores the following data locally on your device:</p>
+            <ul class="list">
+                <li><span class="check">✓</span> <strong>Settings & Preferences:</strong> Your chosen default upload
+                    service, API keys</li>
+                <li><span class="check">✓</span> <strong>Upload History:</strong> A record of your recent uploads
+                    (stored only on your device)</li>
+                <li><span class="check">✓</span> <strong>Folder Access Handles:</strong> References to folders you've
+                    selected for monitoring</li>
+            </ul>
+            <p>This data never leaves your device unless you explicitly choose to sync Chrome settings.</p>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">🔐</span> Permissions</h2>
+            <p>LinkCaster requests the following browser permissions:</p>
+            <table class="permissions-table">
+                <thead>
+                    <tr>
+                        <th>Permission</th>
+                        <th>Purpose</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>storage</td>
+                        <td>Save your settings and preferences locally</td>
+                    </tr>
+                    <tr>
+                        <td>activeTab</td>
+                        <td>Access the current tab only when you click the extension</td>
+                    </tr>
+                    <tr>
+                        <td>identity</td>
+                        <td>Authenticate with Google Drive (OAuth)</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">🔒</span> Data Security</h2>
+            <ul class="list">
+                <li><span class="check">✓</span> All communications with third-party APIs use HTTPS encryption</li>
+                <li><span class="check">✓</span> OAuth tokens are stored securely using Chrome's built-in storage</li>
+                <li><span class="check">✓</span> No sensitive data is ever transmitted to our servers</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <h2><span class="icon">📝</span> Policy Updates</h2>
+            <p>We may update this privacy policy from time to time. Any changes will be reflected in the "Last Updated"
+                date at the top of this document.</p>
+        </div>
+
+        <div class="summary-box">
+            <p>✨ <strong>Summary:</strong> LinkCaster processes everything locally. We don't collect your data. When you
+                upload to third-party services, their privacy policies apply.</p>
+        </div>
+
+        <footer>
+            <p>Questions? <a href="https://github.com/Trittton/LinkCaster/issues" target="_blank">Open an issue on
+                    GitHub</a></p>
+            <p style="margin-top: 12px;">© 2026 LinkCaster. All rights reserved.</p>
+        </footer>
+    </div>
+</body>
+
+</html>
