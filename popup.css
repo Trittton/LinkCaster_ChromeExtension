@@ -761,6 +761,33 @@ textarea::-webkit-scrollbar-thumb:hover {
   padding: 4px 10px;
 }
 
+.history-link {
+  font-size: 11px;
+  word-break: break-all;
+  text-decoration: none;
+  display: block;
+  padding: 4px 6px;
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.history-link-original {
+  color: var(--text-secondary);
+}
+
+.history-link-original:hover {
+  color: #667eea;
+}
+
+.history-link-converted {
+  color: #38ef7d;
+}
+
+.history-link-converted:hover {
+  opacity: 0.8;
+}
+
 /* Upload Img Section */
 .upload-section {
   padding: 12px 0;

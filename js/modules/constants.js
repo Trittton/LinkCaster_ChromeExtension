@@ -10,14 +10,8 @@
  */
 export const API_ENDPOINTS = {
   CATBOX: 'https://catbox.moe/user/api.php',
-  FREEIMAGE: 'https://freeimage.host/api/1/upload?key=6d207e02198a847aa98d0a2a901485a5',
   VGY: 'https://vgy.me/upload',
-  GYAZO: 'https://upload.gyazo.com/api/upload',
-  BACKEND: 'https://web-production-674b.up.railway.app',
-  FLICKR_REQUEST_TOKEN: 'https://www.flickr.com/services/oauth/request_token',
-  FLICKR_AUTHORIZE: 'https://www.flickr.com/services/oauth/authorize',
-  FLICKR_ACCESS_TOKEN: 'https://www.flickr.com/services/oauth/access_token',
-  FLICKR_UPLOAD: 'https://up.flickr.com/services/upload/'
+  BACKEND: 'https://web-production-674b.up.railway.app'
 };
 
 /**
@@ -25,9 +19,7 @@ export const API_ENDPOINTS = {
  * @constant {Object}
  */
 export const API_LINKS = {
-  vgy: 'https://vgy.me/account/details',
-  flickr: 'https://www.flickr.com/services/apps/create/apply',
-  gyazo: 'https://gyazo.com/oauth/applications'
+  vgy: 'https://vgy.me/account/details'
 };
 
 /**
@@ -36,8 +28,6 @@ export const API_LINKS = {
  */
 export const SERVICE_INFO = {
   vgy: 'Requires user key',
-  flickr: 'Requires OAuth authentication',
-  gyazo: 'Requires access token',
   gdrive: 'Requires Google Drive connection'
 };
 
@@ -76,13 +66,7 @@ export const STORAGE_KEYS = {
 
   // Sync storage (API keys, settings)
   SELECTED_HOST: 'selectedHost',
-  VGY_API_KEY: 'vgyApiKey',
-  GYAZO_ACCESS_TOKEN: 'gyazoAccessToken',
-  FLICKR_API_KEY: 'flickrApiKey',
-  FLICKR_API_SECRET: 'flickrApiSecret',
-  FLICKR_OAUTH_TOKEN: 'flickrOAuthToken',
-  FLICKR_OAUTH_TOKEN_SECRET: 'flickrOAuthTokenSecret',
-  FLICKR_USERNAME: 'flickrUsername'
+  VGY_API_KEY: 'vgyApiKey'
 };
 
 /**

@@ -14,19 +14,10 @@
     "https://image.prntscr.com/*",
     "https://img.lightshot.app/*",
     "https://catbox.moe/*",
-    "https://api.imgur.com/*",
-    "https://freeimage.host/*",
-    "https://www.flickr.com/*",
-    "https://api.flickr.com/*",
-    "https://up.flickr.com/*",
     "https://vgy.me/*",
-    "https://gyazo.com/*",
-    "https://upload.gyazo.com/*",
-    "https://i.gyazo.com/*",
     "https://drive.google.com/*",
     "https://www.googleapis.com/*",
-    "https://web-production-674b.up.railway.app/*",
-    "https://*/*"
+    "https://web-production-674b.up.railway.app/*"
   ],
   "action": {
     "default_popup": "popup.html",

@@ -1,11 +1,11 @@
 /**
  * Upload Services Module
- * Handles file uploads to various cloud services
+ * Handles file uploads to cloud services (Catbox, vgy.me, Google Drive)
  * @module uploadServices
  */
 
 import { logErrorMessage, logInfo, withErrorLogging } from './errorLogger.js';
-import { validateImageFile, sanitizeFilename } from './validator.js';
+import { sanitizeFilename } from './validator.js';
 import { getStorage, setStorage } from './storage.js';
 
 /**
@@ -62,7 +62,6 @@ export async function getDirectImageUrl(url) {
   }
 
   // Handle iCloud shared photo/video links via backend
-  // Apple's iCloud Photo Links require server-side processing
   if (url.includes('share.icloud.com') || url.includes('icloud.com/photos')) {
     return await withErrorLogging(async () => {
       console.log('[DEBUG] Processing iCloud URL via backend:', url);
@@ -92,7 +91,7 @@ export async function getDirectImageUrl(url) {
     return await withErrorLogging(async () => {
       console.log('[DEBUG] Processing Lightshot URL:', url);
 
-      // Try using background script to fetch the image URL with proper rendering
+      // Try using background script to fetch the image URL
       try {
         console.log('[DEBUG] Attempting extraction via background script...');
         const response = await chrome.runtime.sendMessage({
@@ -110,7 +109,7 @@ export async function getDirectImageUrl(url) {
         console.warn('[DEBUG] Background extraction failed:', error.message);
       }
 
-      // Fallback: Try direct fetch (unlikely to work due to JS requirement)
+      // Fallback: Try direct fetch
       console.log('[DEBUG] Falling back to direct fetch...');
       const response = await fetch(url);
 
@@ -121,7 +120,7 @@ export async function getDirectImageUrl(url) {
       const html = await response.text();
       console.log('[DEBUG] HTML length:', html.length);
 
-      // Try multiple patterns to find the image URL (Lightshot now uses img.lightshot.app)
+      // Try multiple patterns to find the image URL
       const patterns = [
         /property=["']og:image["']\s+content=["']([^"']*(?:image\.prntscr\.com|img\.lightshot\.app)[^"']*)["']/i,
         /name=["']twitter:image:src["']\s+content=["']([^"']*(?:image\.prntscr\.com|img\.lightshot\.app)[^"']*)["']/i,
@@ -139,11 +138,9 @@ export async function getDirectImageUrl(url) {
           if (imageUrl.startsWith('//')) {
             imageUrl = 'https:' + imageUrl;
           } else if (!imageUrl.startsWith('http')) {
-            // Check if it contains the domain
             if (imageUrl.includes('image.prntscr.com') || imageUrl.includes('img.lightshot.app')) {
               imageUrl = 'https://' + imageUrl;
             } else {
-              // Default to img.lightshot.app (Lightshot's current CDN)
               imageUrl = 'https://img.lightshot.app/' + imageUrl;
             }
           }
@@ -167,11 +164,11 @@ export async function getDirectImageUrl(url) {
 export async function uploadToCatbox(file) {
   const wrappedFn = withErrorLogging(async () => {
     const MAX_RETRIES = 3;
-    const TIMEOUT_MS = 60000; // 60 seconds timeout (Catbox can be slow)
+    const TIMEOUT_MS = 60000; // 60 seconds timeout
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
-        // Add a small delay before each attempt (except first) to avoid rate limiting
+        // Add delay before retries
         if (attempt > 0) {
           const waitTime = Math.min(2000 * Math.pow(2, attempt - 1), 10000);
           await logInfo(`Waiting ${waitTime}ms before retry ${attempt}...`);
@@ -182,7 +179,6 @@ export async function uploadToCatbox(file) {
         formData.append('fileToUpload', file, 'image.png');
         formData.append('reqtype', 'fileupload');
 
-        // Create abort controller for timeout
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
@@ -214,7 +210,6 @@ export async function uploadToCatbox(file) {
       } catch (error) {
         await logErrorMessage(`Catbox upload attempt ${attempt + 1} failed`, error);
 
-        // If this is the last attempt, throw the error
         if (attempt === MAX_RETRIES) {
           if (error.name === 'AbortError') {
             throw new Error('Catbox upload timed out after 60 seconds. The service might be slow or unavailable.');
@@ -229,40 +224,6 @@ export async function uploadToCatbox(file) {
       }
     }
   }, 'uploadToCatbox');
-
-  return wrappedFn();
-}
-
-/**
- * Uploads file to FreeImage.host
- * @param {Blob|File} file - File to upload
- * @returns {Promise<string>} Uploaded file URL
- */
-export async function uploadToFreeImage(file) {
-  const wrappedFn = withErrorLogging(async () => {
-    const formData = new FormData();
-    formData.append('source', file);
-    formData.append('type', 'file');
-    formData.append('action', 'upload');
-
-    const response = await fetch('https://freeimage.host/api/1/upload?key=6d207e02198a847aa98d0a2a901485a5', {
-      method: 'POST',
-      body: formData
-    });
-
-    if (!response.ok) {
-      throw new Error(`FreeImage upload failed: ${response.status}`);
-    }
-
-    const data = await response.json();
-
-    if (data.image && data.image.url) {
-      await logInfo('FreeImage upload successful', { url: data.image.url });
-      return data.image.url;
-    }
-
-    throw new Error('FreeImage returned invalid response');
-  }, 'uploadToFreeImage');
 
   return wrappedFn();
 }
@@ -312,48 +273,6 @@ export async function uploadToVgy(file, userKey) {
 }
 
 /**
- * Uploads file to Gyazo
- * @param {Blob|File} file - File to upload
- * @param {string} accessToken - Gyazo access token
- * @returns {Promise<string>} Uploaded file URL
- */
-export async function uploadToGyazo(file, accessToken) {
-  const wrappedFn = withErrorLogging(async () => {
-    const formData = new FormData();
-    formData.append('imagedata', file);
-
-    const response = await fetch('https://upload.gyazo.com/api/upload', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${accessToken}`
-      },
-      body: formData
-    });
-
-    const data = await response.json();
-
-    if (!response.ok || data.error) {
-      if (response.status === 401 || response.status === 403) {
-        throw new Error('Invalid Gyazo access token. Please check your API credentials.');
-      }
-
-      const errorMsg = data.message || data.error || response.statusText;
-      throw new Error(`Gyazo: ${errorMsg}`);
-    }
-
-    const url = data.url || data.permalink_url;
-    if (url) {
-      await logInfo('Gyazo upload successful', { url });
-      return url;
-    }
-
-    throw new Error('Gyazo returned invalid response');
-  }, 'uploadToGyazo');
-
-  return wrappedFn();
-}
-
-/**
  * Uploads file to Google Drive
  * @param {Blob|File} file - File to upload
  * @param {string} sessionId - Google Drive session ID
@@ -376,7 +295,7 @@ export async function uploadToGoogleDrive(file, sessionId) {
       await logInfo('Google Drive upload successful', { url: response.url });
       return response.url;
     } else {
-      // Check for auth-related errors that indicate session expiry
+      // Check for auth-related errors
       const authErrors = [
         'Unauthorized',
         'Invalid session',
@@ -397,37 +316,6 @@ export async function uploadToGoogleDrive(file, sessionId) {
       throw new Error(response.error);
     }
   }, 'uploadToGoogleDrive');
-
-  return wrappedFn();
-}
-
-/**
- * Uploads file to Flickr
- * @param {Blob|File} file - File to upload
- * @param {string} oauthToken - Flickr OAuth token
- * @param {string} oauthTokenSecret - Flickr OAuth token secret
- * @returns {Promise<string>} Uploaded file URL
- */
-export async function uploadToFlickr(file, oauthToken, oauthTokenSecret) {
-  const wrappedFn = withErrorLogging(async () => {
-    const base64Data = await blobToBase64(file);
-
-    return new Promise((resolve, reject) => {
-      chrome.runtime.sendMessage({
-        action: 'flickrUpload',
-        imageData: base64Data,
-        oauthToken: oauthToken,
-        oauthTokenSecret: oauthTokenSecret
-      }, (response) => {
-        if (response && response.success) {
-          logInfo('Flickr upload successful', { url: response.url });
-          resolve(response.url);
-        } else {
-          reject(new Error(response?.error || 'Flickr upload failed'));
-        }
-      });
-    });
-  }, 'uploadToFlickr');
 
   return wrappedFn();
 }

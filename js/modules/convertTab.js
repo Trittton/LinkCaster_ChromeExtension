@@ -11,13 +11,11 @@ import { getStorage, setStorage, addToHistory, getHistory, clearHistory } from '
 import { uploadToCatbox, uploadToGoogleDrive, downloadImage, getDirectImageUrl } from './uploadServices.js';
 
 /**
- * Configuration for API links and OAuth
+ * Configuration for API links
  * @constant {Object}
  */
 export const API_LINKS = {
-  vgy: 'https://vgy.me/account/details',
-  flickr: 'https://www.flickr.com/services/apps/create/apply',
-  gyazo: 'https://gyazo.com/oauth/applications'
+  vgy: 'https://vgy.me/account/details'
 };
 
 /**
@@ -25,9 +23,7 @@ export const API_LINKS = {
  * @constant {Object}
  */
 export const SERVICE_INFO = {
-  vgy: 'Requires user key',
-  flickr: 'Requires OAuth authentication',
-  gyazo: 'Requires access token'
+  vgy: 'Requires user key'
 };
 
 /**
@@ -155,6 +151,11 @@ export async function updateApiUI(elements) {
   // Show appropriate panel based on selected service
   if (host === 'vgy') {
     elements.apiSettings.style.display = 'block';
+    // Load saved API key from shared storage
+    const data = await getStorage(['vgyApiKey'], 'sync');
+    if (data.vgyApiKey && elements.apiKey) {
+      elements.apiKey.value = data.vgyApiKey;
+    }
   } else if (host === 'gdrive' && elements.convertGdriveConnection) {
     elements.convertGdriveConnection.style.display = 'block';
     // Update Google Drive status from shared storage
@@ -169,7 +170,9 @@ export async function updateApiUI(elements) {
  */
 async function checkApiKeyStatus(elements) {
   const host = elements.hostSelect.value;
-  const needsApi = ['vgy', 'flickr', 'gyazo'].includes(host);
+  const needsApi = host === 'vgy';
+
+  if (!elements.apiWarning) return;
 
   if (!needsApi) {
     elements.apiWarning.style.display = 'none';
@@ -177,22 +180,8 @@ async function checkApiKeyStatus(elements) {
   }
 
   try {
-    const data = await getStorage([
-      'flickrOAuthToken',
-      'flickrOAuthTokenSecret',
-      'vgyApiKey',
-      'gyazoAccessToken'
-    ], 'sync');
-
-    let hasKey = false;
-    if (host === 'flickr') {
-      hasKey = !!(data.flickrOAuthToken && data.flickrOAuthTokenSecret);
-    } else if (host === 'vgy') {
-      hasKey = !!data.vgyApiKey;
-    } else if (host === 'gyazo') {
-      hasKey = !!data.gyazoAccessToken;
-    }
-
+    const data = await getStorage(['vgyApiKey'], 'sync');
+    const hasKey = !!data.vgyApiKey;
     elements.apiWarning.style.display = hasKey ? 'none' : 'block';
   } catch (error) {
     await logErrorMessage('Failed to check API key status', error);
@@ -223,15 +212,10 @@ async function handleSaveApiKey(elements) {
     return;
   }
 
-  const storageKey = host === 'vgy' ? 'vgyApiKey' :
-    host === 'gyazo' ? 'gyazoAccessToken' :
-      host === 'flickr' ? 'flickrApiKey' : null;
-
-  if (storageKey) {
-    await setStorage({ [storageKey]: key }, 'sync');
+  if (host === 'vgy') {
+    await setStorage({ vgyApiKey: key }, 'sync');
     showStatus('Settings saved successfully!', StatusType.SUCCESS);
     await checkApiKeyStatus(elements);
-    elements.apiSettings.style.display = 'none';
     await logInfo('API key saved', { host });
   }
 }
@@ -356,20 +340,10 @@ async function validateServiceRequirements(host) {
     if (!data.googleDriveSessionId || !data.googleDriveConnected) {
       return { valid: false, error: 'Please connect to Google Drive first' };
     }
-  } else if (host === 'flickr') {
-    const data = await getStorage(['flickrOAuthToken', 'flickrOAuthTokenSecret'], 'sync');
-    if (!data.flickrOAuthToken || !data.flickrOAuthTokenSecret) {
-      return { valid: false, error: 'Please authenticate with Flickr first' };
-    }
   } else if (host === 'vgy') {
     const data = await getStorage(['vgyApiKey'], 'sync');
     if (!data.vgyApiKey) {
       return { valid: false, error: 'Please configure vgy.me user key first' };
-    }
-  } else if (host === 'gyazo') {
-    const data = await getStorage(['gyazoAccessToken'], 'sync');
-    if (!data.gyazoAccessToken) {
-      return { valid: false, error: 'Please authenticate with Gyazo first' };
     }
   }
 
@@ -666,11 +640,11 @@ async function renderConvertHistory(elements) {
         </div>
         <div style="margin-bottom: 6px;">
           <div style="font-size: 10px; color: var(--text-dimmed); margin-bottom: 2px;">Original:</div>
-          <a href="${item.originalUrl}" target="_blank" style="font-size: 11px; color: var(--text-secondary); word-break: break-all; text-decoration: none; display: block; padding: 4px 6px; background: var(--bg-tertiary); border-radius: 4px; transition: all 0.2s;" onmouseover="this.style.color='#667eea'" onmouseout="this.style.color='var(--text-secondary)'">${item.originalUrl}</a>
+          <a href="${item.originalUrl}" target="_blank" class="history-link history-link-original">${item.originalUrl}</a>
         </div>
         <div>
           <div style="font-size: 10px; color: var(--text-dimmed); margin-bottom: 2px;">Converted:</div>
-          <a href="${item.convertedUrl}" target="_blank" style="font-size: 11px; color: #38ef7d; word-break: break-all; text-decoration: none; display: block; padding: 4px 6px; background: var(--bg-tertiary); border-radius: 4px; transition: all 0.2s;" onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'">${item.convertedUrl}</a>
+          <a href="${item.convertedUrl}" target="_blank" class="history-link history-link-converted">${item.convertedUrl}</a>
         </div>
         <div class="history-item-actions" style="display: flex; gap: 6px; margin-top: 8px;">
           <button class="copy-original-btn secondary" data-url="${item.originalUrl}" style="font-size: 10px; padding: 4px 10px;">Copy Original</button>
