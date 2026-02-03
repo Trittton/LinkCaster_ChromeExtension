@@ -200,16 +200,46 @@ function setupEventListeners(elements) {
     });
   }
 
-  // Select All button
+  // Select All button - three-state behavior:
+  // 1. First click: Select only unuploaded files
+  // 2. Second click: Select ALL files (if there are uploaded ones)
+  // 3. If all selected: Deselect all
   if (elements.selectAllBtn) {
     elements.selectAllBtn.addEventListener('click', () => {
-      const checkboxes = elements.fileList.querySelectorAll('.file-checkbox:not(:disabled)');
-      checkboxes.forEach(cb => cb.checked = true);
-      const count = checkboxes.length;
-      if (count > 0) {
-        showStatus(`Selected ${count} file(s)`, StatusType.SUCCESS, getStatusElement());
-      } else {
+      const allCheckboxes = elements.fileList.querySelectorAll('.file-checkbox:not(:disabled)');
+      const uploadedCheckboxes = elements.fileList.querySelectorAll('.file-checkbox.uploaded:not(:disabled)');
+      const unuploadedCheckboxes = elements.fileList.querySelectorAll('.file-checkbox:not(.uploaded):not(:disabled)');
+
+      if (allCheckboxes.length === 0) {
         showStatus('No files available to select', StatusType.WARNING, getStatusElement());
+        return;
+      }
+
+      const allChecked = Array.from(allCheckboxes).every(cb => cb.checked);
+      const allUnuploadedChecked = unuploadedCheckboxes.length > 0 &&
+        Array.from(unuploadedCheckboxes).every(cb => cb.checked);
+      const someUploadedUnchecked = uploadedCheckboxes.length > 0 &&
+        Array.from(uploadedCheckboxes).some(cb => !cb.checked);
+
+      if (allChecked) {
+        // All selected -> Deselect all
+        allCheckboxes.forEach(cb => cb.checked = false);
+        showStatus('Deselected all files', StatusType.SUCCESS, getStatusElement());
+      } else if (allUnuploadedChecked && someUploadedUnchecked) {
+        // All unuploaded selected but some uploaded not selected -> Select ALL
+        allCheckboxes.forEach(cb => cb.checked = true);
+        showStatus(`Selected all ${allCheckboxes.length} file(s)`, StatusType.SUCCESS, getStatusElement());
+      } else {
+        // Default: Select only unuploaded files first
+        if (unuploadedCheckboxes.length > 0) {
+          allCheckboxes.forEach(cb => cb.checked = false);
+          unuploadedCheckboxes.forEach(cb => cb.checked = true);
+          showStatus(`Selected ${unuploadedCheckboxes.length} unuploaded file(s)`, StatusType.SUCCESS, getStatusElement());
+        } else {
+          // No unuploaded files, select all
+          allCheckboxes.forEach(cb => cb.checked = true);
+          showStatus(`Selected all ${allCheckboxes.length} file(s)`, StatusType.SUCCESS, getStatusElement());
+        }
       }
     });
   }

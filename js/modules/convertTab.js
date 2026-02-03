@@ -498,8 +498,8 @@ async function processUrl(url, host) {
 
         // Create form data for vgy.me upload
         const formData = new FormData();
+        formData.append('file', imageBlob, 'image.png');
         formData.append('userkey', data.vgyApiKey);
-        formData.append('file', imageBlob, 'image.jpg');
 
         const response = await fetch('https://vgy.me/upload', {
           method: 'POST',
@@ -507,11 +507,24 @@ async function processUrl(url, host) {
         });
 
         const result = await response.json();
-        if (!result.success) {
-          throw new Error(result.error || 'vgy.me upload failed');
+
+        // vgy.me returns { error: true, messages: {...} } on failure
+        if (result.error === true) {
+          if (result.messages && result.messages.Unauthorized) {
+            throw new Error('Invalid vgy.me user key. Please check your API credentials.');
+          }
+          if (result.messages) {
+            const firstMessage = Object.values(result.messages)[0];
+            throw new Error(`vgy.me: ${firstMessage}`);
+          }
+          throw new Error('vgy.me upload failed');
         }
 
-        newUrl = result.image;
+        // vgy.me can return URL in different fields
+        newUrl = result.image || result.url || result.link;
+        if (!newUrl) {
+          throw new Error('vgy.me returned invalid response');
+        }
       } else {
         throw new Error(`Unsupported host: ${host}`);
       }

@@ -14,7 +14,8 @@ import { sanitizeHtml } from './validator.js';
 export const StatusType = {
   SUCCESS: 'success',
   ERROR: 'error',
-  INFO: 'info'
+  INFO: 'info',
+  WARNING: 'warning'
 };
 
 /**
@@ -182,7 +183,7 @@ export function createFileItemHtml(fileInfo, wasChecked = false) {
           ${sizeStr} • ${timeStr}
         </div>
       </div>
-      <input type="checkbox" class="file-checkbox" data-filename="${safeFileName}" ${checkedAttr} style="margin-left: 8px;">
+      <input type="checkbox" class="file-checkbox ${uploadedClass}" data-filename="${safeFileName}" ${checkedAttr} style="margin-left: 8px;">
     </div>
   `;
 }

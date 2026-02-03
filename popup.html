@@ -117,9 +117,17 @@
           <label>Upload Service</label>
           <select id="image-service-select" style="width: 100%; margin-top: 8px;">
             <option value="catbox">Catbox.moe</option>
-            <option value="imgur">Imgur (requires API key)</option>
+            <option value="vgy">vgy.me (requires user key)</option>
             <option value="gdrive">Google Drive</option>
           </select>
+
+          <!-- vgy.me API Key (shown when vgy selected) -->
+          <div id="image-vgy-settings" style="display: none; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-color);">
+            <label for="image-vgy-key" style="display: block; margin-bottom: 8px;">vgy.me User Key</label>
+            <input type="text" id="image-vgy-key" placeholder="Enter your vgy.me user key" style="width: 100%; padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--input-bg); color: var(--text-secondary); font-size: 13px;">
+            <small style="display: block; margin-top: 6px; color: var(--text-dimmed); font-size: 11px;">Get your user key from <a href="https://vgy.me/account/details" target="_blank" style="color: #4a9eff; text-decoration: none;">vgy.me account</a></small>
+            <button id="image-save-vgy-key" class="primary" style="margin-top: 8px; width: 100%;">Save API Key</button>
+          </div>
 
           <!-- Google Drive Connection (shown when Google Drive selected) -->
           <div id="image-gdrive-connection" style="display: none; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-color);">

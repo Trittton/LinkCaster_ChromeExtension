@@ -9,7 +9,7 @@ import { validateImageFile } from './validator.js';
 import { showStatus, updateProgress, formatDate, createHistoryItemHtml, createFileItemHtml, StatusType } from './uiHelpers.js';
 import { getStorage, setStorage, addToHistory, getHistory, clearHistory, getFolderHandle, saveFolderHandle } from './storage.js';
 import { scanFolder, requestFolderPermission, checkFolderPermission } from './fileMonitoring.js';
-import { uploadToCatbox, uploadToGoogleDrive } from './uploadServices.js';
+import { uploadToCatbox, uploadToGoogleDrive, uploadToVgy } from './uploadServices.js';
 import { getCurrentTab } from './tabs.js';
 
 /**
@@ -137,7 +137,20 @@ function setupEventListeners(elements) {
   if (elements.serviceSelect) {
     elements.serviceSelect.addEventListener('change', () => {
       setStorage({ imageUploadService: elements.serviceSelect.value });
-      updateImageGDriveUI(elements);
+      updateImageServiceUI(elements);
+    });
+  }
+
+  // vgy.me API key save button
+  if (elements.saveVgyKey) {
+    elements.saveVgyKey.addEventListener('click', async () => {
+      const key = elements.vgyKeyInput.value.trim();
+      if (!key) {
+        showStatus('Please enter a valid vgy.me user key', StatusType.ERROR, getStatusElement());
+        return;
+      }
+      await setStorage({ vgyApiKey: key }, 'sync');
+      showStatus('vgy.me API key saved!', StatusType.SUCCESS, getStatusElement());
     });
   }
 
@@ -205,16 +218,46 @@ function setupEventListeners(elements) {
     });
   }
 
-  // Select All button
+  // Select All button - three-state behavior:
+  // 1. First click: Select only unuploaded files
+  // 2. Second click: Select ALL files (if there are uploaded ones)
+  // 3. If all selected: Deselect all
   if (elements.selectAllBtn) {
     elements.selectAllBtn.addEventListener('click', () => {
-      const checkboxes = elements.fileList.querySelectorAll('.file-checkbox:not(:disabled)');
-      checkboxes.forEach(cb => cb.checked = true);
-      const count = checkboxes.length;
-      if (count > 0) {
-        showStatus(`Selected ${count} file(s)`, StatusType.SUCCESS, getStatusElement());
-      } else {
+      const allCheckboxes = elements.fileList.querySelectorAll('.file-checkbox:not(:disabled)');
+      const uploadedCheckboxes = elements.fileList.querySelectorAll('.file-checkbox.uploaded:not(:disabled)');
+      const unuploadedCheckboxes = elements.fileList.querySelectorAll('.file-checkbox:not(.uploaded):not(:disabled)');
+
+      if (allCheckboxes.length === 0) {
         showStatus('No files available to select', StatusType.WARNING, getStatusElement());
+        return;
+      }
+
+      const allChecked = Array.from(allCheckboxes).every(cb => cb.checked);
+      const allUnuploadedChecked = unuploadedCheckboxes.length > 0 &&
+        Array.from(unuploadedCheckboxes).every(cb => cb.checked);
+      const someUploadedUnchecked = uploadedCheckboxes.length > 0 &&
+        Array.from(uploadedCheckboxes).some(cb => !cb.checked);
+
+      if (allChecked) {
+        // All selected -> Deselect all
+        allCheckboxes.forEach(cb => cb.checked = false);
+        showStatus('Deselected all files', StatusType.SUCCESS, getStatusElement());
+      } else if (allUnuploadedChecked && someUploadedUnchecked) {
+        // All unuploaded selected but some uploaded not selected -> Select ALL
+        allCheckboxes.forEach(cb => cb.checked = true);
+        showStatus(`Selected all ${allCheckboxes.length} file(s)`, StatusType.SUCCESS, getStatusElement());
+      } else {
+        // Default: Select only unuploaded files first
+        if (unuploadedCheckboxes.length > 0) {
+          allCheckboxes.forEach(cb => cb.checked = false);
+          unuploadedCheckboxes.forEach(cb => cb.checked = true);
+          showStatus(`Selected ${unuploadedCheckboxes.length} unuploaded file(s)`, StatusType.SUCCESS, getStatusElement());
+        } else {
+          // No unuploaded files, select all
+          allCheckboxes.forEach(cb => cb.checked = true);
+          showStatus(`Selected all ${allCheckboxes.length} file(s)`, StatusType.SUCCESS, getStatusElement());
+        }
       }
     });
   }
@@ -392,9 +435,12 @@ async function handleUploadImages(elements) {
   const service = elements.serviceSelect ? elements.serviceSelect.value : 'catbox';
 
   // Validate service requirements
-  if (service === 'imgur') {
-    showStatus('Imgur upload requires API key configuration', StatusType.ERROR, getStatusElement());
-    return;
+  if (service === 'vgy') {
+    const data = await getStorage(['vgyApiKey'], 'sync');
+    if (!data.vgyApiKey) {
+      showStatus('Please configure vgy.me user key first', StatusType.ERROR, getStatusElement());
+      return;
+    }
   }
 
   if (service === 'gdrive') {
@@ -437,6 +483,9 @@ async function handleUploadImages(elements) {
           if (service === 'gdrive') {
             const data = await getStorage(['googleDriveSessionId']);
             url = await uploadToGoogleDrive(file, data.googleDriveSessionId);
+          } else if (service === 'vgy') {
+            const data = await getStorage(['vgyApiKey'], 'sync');
+            url = await uploadToVgy(file, data.vgyApiKey);
           } else {
             url = await uploadToCatbox(file);
           }
@@ -551,19 +600,42 @@ async function renderImageHistory(elements) {
 }
 
 /**
- * Updates Google Drive UI
+ * Updates service-specific UI (vgy.me settings, Google Drive connection)
+ * @param {Object} elements - DOM elements
+ * @returns {Promise<void>}
+ */
+async function updateImageServiceUI(elements) {
+  const service = elements.serviceSelect ? elements.serviceSelect.value : 'catbox';
+
+  // Hide all service-specific panels first
+  if (elements.gdriveConnection) {
+    elements.gdriveConnection.style.display = 'none';
+  }
+  if (elements.vgySettings) {
+    elements.vgySettings.style.display = 'none';
+  }
+
+  // Show appropriate panel based on selected service
+  if (service === 'gdrive' && elements.gdriveConnection) {
+    elements.gdriveConnection.style.display = 'block';
+    await updateImageGDriveStatus(elements);
+  } else if (service === 'vgy' && elements.vgySettings) {
+    elements.vgySettings.style.display = 'block';
+    // Load saved API key
+    const data = await getStorage(['vgyApiKey'], 'sync');
+    if (data.vgyApiKey && elements.vgyKeyInput) {
+      elements.vgyKeyInput.value = data.vgyApiKey;
+    }
+  }
+}
+
+/**
+ * Updates Google Drive UI (legacy wrapper for compatibility)
  * @param {Object} elements - DOM elements
  * @returns {Promise<void>}
  */
 async function updateImageGDriveUI(elements) {
-  const service = elements.serviceSelect ? elements.serviceSelect.value : 'catbox';
-
-  if (service === 'gdrive' && elements.gdriveConnection) {
-    elements.gdriveConnection.style.display = 'block';
-    await updateImageGDriveStatus(elements);
-  } else if (elements.gdriveConnection) {
-    elements.gdriveConnection.style.display = 'none';
-  }
+  await updateImageServiceUI(elements);
 }
 
 /**
@@ -666,6 +738,9 @@ function getElements() {
     gdriveConnection: document.getElementById('image-gdrive-connection'),
     gdriveConnect: document.getElementById('image-gdrive-connect'),
     gdriveUnlink: document.getElementById('image-gdrive-unlink'),
-    gdriveStatus: document.getElementById('image-gdrive-status')
+    gdriveStatus: document.getElementById('image-gdrive-status'),
+    vgySettings: document.getElementById('image-vgy-settings'),
+    vgyKeyInput: document.getElementById('image-vgy-key'),
+    saveVgyKey: document.getElementById('image-save-vgy-key')
   };
 }

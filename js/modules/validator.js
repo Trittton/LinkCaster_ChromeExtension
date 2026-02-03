@@ -7,16 +7,16 @@
 import { logWarning } from './errorLogger.js';
 
 /**
- * Maximum file size in bytes (100MB)
+ * Maximum file size in bytes (300MB)
  * @constant {number}
  */
-export const MAX_FILE_SIZE = 100 * 1024 * 1024;
+export const MAX_FILE_SIZE = 300 * 1024 * 1024;
 
 /**
- * Maximum video file size in bytes (500MB)
+ * Maximum video file size in bytes (700MB)
  * @constant {number}
  */
-export const MAX_VIDEO_SIZE = 500 * 1024 * 1024;
+export const MAX_VIDEO_SIZE = 700 * 1024 * 1024;
 
 /**
  * Allowed image MIME types
@@ -70,7 +70,7 @@ export function isValidImageUrl(url) {
   if (!isValidUrl(url)) return false;
 
   const imageExtensions = /\.(jpg|jpeg|png|gif|bmp|webp)(\?.*)?$/i;
-  const knownServices = /(prnt\.sc|prntscr\.com|lightshot\.com|i\.imgur\.com|imgur\.com)/i;
+  const knownServices = /(prnt\.sc|prntscr\.com|lightshot\.com|i\.imgur\.com|imgur\.com|share\.icloud\.com|icloud\.com\/photos)/i;
 
   return imageExtensions.test(url) || knownServices.test(url);
 }

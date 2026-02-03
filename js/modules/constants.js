@@ -27,8 +27,7 @@ export const API_ENDPOINTS = {
 export const API_LINKS = {
   vgy: 'https://vgy.me/account/details',
   flickr: 'https://www.flickr.com/services/apps/create/apply',
-  gyazo: 'https://gyazo.com/oauth/applications',
-  imgur: 'https://api.imgur.com/oauth2/addclient'
+  gyazo: 'https://gyazo.com/oauth/applications'
 };
 
 /**
@@ -39,7 +38,6 @@ export const SERVICE_INFO = {
   vgy: 'Requires user key',
   flickr: 'Requires OAuth authentication',
   gyazo: 'Requires access token',
-  imgur: 'Requires Client ID',
   gdrive: 'Requires Google Drive connection'
 };
 
@@ -48,8 +46,8 @@ export const SERVICE_INFO = {
  * @constant {Object}
  */
 export const FILE_LIMITS = {
-  MAX_IMAGE_SIZE: 100 * 1024 * 1024, // 100MB
-  MAX_VIDEO_SIZE: 500 * 1024 * 1024, // 500MB
+  MAX_IMAGE_SIZE: 300 * 1024 * 1024, // 300MB
+  MAX_VIDEO_SIZE: 700 * 1024 * 1024, // 700MB
   MAX_HISTORY_ITEMS: 50
 };
 
@@ -84,8 +82,7 @@ export const STORAGE_KEYS = {
   FLICKR_API_SECRET: 'flickrApiSecret',
   FLICKR_OAUTH_TOKEN: 'flickrOAuthToken',
   FLICKR_OAUTH_TOKEN_SECRET: 'flickrOAuthTokenSecret',
-  FLICKR_USERNAME: 'flickrUsername',
-  IMGUR_CLIENT_ID: 'imgurClientId'
+  FLICKR_USERNAME: 'flickrUsername'
 };
 
 /**
