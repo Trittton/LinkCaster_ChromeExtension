@@ -6,7 +6,7 @@ dist/
 
 # Dependencies
 node_modules/
-backend/node_modules/
+backend/
 
 # Environment variables
 .env
