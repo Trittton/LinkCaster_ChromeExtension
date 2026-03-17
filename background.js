@@ -420,14 +420,18 @@ async function handleGoogleDriveUpload(fileData, fileName, sessionId) {
   }
 }
 
-// Fallback function for old server-side session method
+// Fallback function when no local tokens are available
 async function uploadViaServerSession(fileData, fileName, sessionId) {
   try {
-    console.log('Using server-side session for upload...');
+    console.log('Using server-side upload fallback...');
 
-    const isSessionValid = await verifyGoogleDriveSession(sessionId);
-    if (!isSessionValid) {
-      throw new Error('Unauthorized: Invalid session ID. Please reconnect to Google Drive.');
+    // Get current access token from Chrome storage
+    const storage = await chrome.storage.local.get(['googleDriveAccessToken', 'googleDriveTokenExpiry']);
+    let accessToken = storage.googleDriveAccessToken;
+
+    // Refresh if expired or expiring within 1 minute
+    if (!accessToken || Date.now() >= (storage.googleDriveTokenExpiry - 60 * 1000)) {
+      accessToken = await refreshGoogleDriveToken();
     }
 
     const uploadResponse = await fetch(`${BACKEND_URL}/api/upload`, {
@@ -436,7 +440,7 @@ async function uploadViaServerSession(fileData, fileName, sessionId) {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        sessionId: sessionId,
+        accessToken: accessToken,
         fileData: fileData,
         filename: fileName
       })

@@ -1,5 +1,5 @@
 # Build output
-build/
+/build/
 dist/
 *.zip
 *.crx
@@ -55,4 +55,4 @@ Thumbs.db
 key.pem
 
 # Development
-.claude/settings.local.json
+.claude/
