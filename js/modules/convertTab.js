@@ -189,16 +189,6 @@ async function checkApiKeyStatus(elements) {
 }
 
 /**
- * Handles settings toggle click
- * @param {Object} elements - DOM elements
- * @returns {void}
- */
-function handleSettingsToggle(elements) {
-  const isExpanded = elements.apiSettings.style.display === 'block';
-  elements.apiSettings.style.display = isExpanded ? 'none' : 'block';
-}
-
-/**
  * Handles save API key button click
  * @param {Object} elements - DOM elements
  * @returns {Promise<void>}
@@ -417,8 +407,7 @@ async function processUrls(urls, host, elements) {
           elements.replaceBtn.disabled = false;
           elements.convertSettingsPanel.style.display = 'block';
           await updateApiUI(elements);
-          showStatus('⚠️ Google Drive session expired. Please reconnect in Settings.', StatusType.ERROR, elements.statusDiv);
-          alert('⚠️ Google Drive session expired!\n\nPlease reconnect to Google Drive in Settings (⚙️) to continue converting images.');
+          showStatus('⚠️ Google Drive session expired. Please reconnect in Settings (⚙️).', StatusType.ERROR, elements.statusDiv);
           return results;
         }
 
@@ -679,9 +668,21 @@ async function renderConvertHistory(elements) {
  * @returns {Promise<void>}
  */
 async function handleClearConvertHistory(elements) {
-  if (!confirm('Are you sure you want to clear all conversion history?')) {
+  // Two-step confirm: first click arms the button, second click (within 4s)
+  // clears. Avoids native confirm(), which can dismiss the popup (F-M3).
+  const btn = elements.clearConvertHistory;
+  if (!btn.classList.contains('confirm-armed')) {
+    btn.classList.add('confirm-armed');
+    btn.textContent = 'Click again to confirm';
+    setTimeout(() => {
+      btn.classList.remove('confirm-armed');
+      btn.textContent = 'Clear All';
+    }, 4000);
     return;
   }
+
+  btn.classList.remove('confirm-armed');
+  btn.textContent = 'Clear All';
 
   await clearHistory('convertHistory');
   await renderConvertHistory(elements);

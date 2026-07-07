@@ -7,6 +7,7 @@
 import { logErrorMessage, logInfo, withErrorLogging } from './errorLogger.js';
 import { sanitizeFilename } from './validator.js';
 import { getStorage, setStorage } from './storage.js';
+import { getEffectiveMimeType } from './mimeFallback.js';
 
 /**
  * Converts blob to base64 data URL
@@ -29,22 +30,42 @@ export function blobToBase64(blob) {
  */
 export async function downloadImage(url) {
   const wrappedFn = withErrorLogging(async () => {
-    const response = await fetch(url, {
-      mode: 'cors',
-      credentials: 'omit'
-    });
+    try {
+      const response = await fetch(url, {
+        mode: 'cors',
+        credentials: 'omit'
+      });
 
-    if (!response.ok) {
-      throw new Error(`Failed to download image: ${response.status} ${response.statusText}`);
+      if (!response.ok) {
+        throw new Error(`Failed to download image: ${response.status} ${response.statusText}`);
+      }
+
+      const blob = await response.blob();
+
+      if (!blob.type.startsWith('image/')) {
+        throw new Error('URL does not point to a valid image');
+      }
+
+      return blob;
+    } catch (directError) {
+      // Fallback: relay the image through the backend for networks that
+      // block the Lightshot CDN (FR-2). Only applies to known CDN hosts.
+      const isLightshotCdn = /^https:\/\/(image\.prntscr\.com|img\.lightshot\.app)\//i.test(url);
+      if (!isLightshotCdn) throw directError;
+
+      await logInfo('Direct image download failed, trying backend relay', { url });
+      const response = await chrome.runtime.sendMessage({ action: 'fetchMediaViaBackend', url });
+
+      if (!response || !response.success || !response.dataUrl) {
+        throw new Error(response?.error || directError.message);
+      }
+
+      const blob = await (await fetch(response.dataUrl)).blob();
+      if (!blob.type.startsWith('image/')) {
+        throw new Error('Backend relay did not return a valid image');
+      }
+      return blob;
     }
-
-    const blob = await response.blob();
-
-    if (!blob.type.startsWith('image/')) {
-      throw new Error('URL does not point to a valid image');
-    }
-
-    return blob;
   }, 'downloadImage');
 
   return wrappedFn();
@@ -280,8 +301,14 @@ export async function uploadToVgy(file, userKey) {
  */
 export async function uploadToGoogleDrive(file, sessionId) {
   const wrappedFn = withErrorLogging(async () => {
-    const fileData = await blobToBase64(file);
-    const extension = file.type.split('/')[1] || 'png';
+    // Resolve MIME via extension fallback (FR-1): a file with an empty type
+    // would produce an invalid data URL and upload as untyped.
+    const mimeType = getEffectiveMimeType(file) || file.type || 'application/octet-stream';
+    const typedBlob = file.type ? file : new Blob([file], { type: mimeType });
+
+    const fileData = await blobToBase64(typedBlob);
+
+    const extension = mimeType.split('/')[1] || 'png';
     const filename = sanitizeFilename(`image_${Date.now()}.${extension}`);
 
     const response = await chrome.runtime.sendMessage({

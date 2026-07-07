@@ -1025,3 +1025,114 @@ textarea::-webkit-scrollbar-thumb:hover {
   font-size: 10px;
   margin-left: 8px;
 }
+
+/* Upload Result Bubbles (FR-3) */
+.upload-results {
+  max-height: 260px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.upload-result-item {
+  padding: 10px 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  transition: border-color 0.2s;
+}
+
+.upload-result-item.uploading {
+  border-color: #4a9eff;
+}
+
+.upload-result-item.done {
+  border-color: rgba(56, 239, 125, 0.4);
+}
+
+.upload-result-item.failed {
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+.upload-result-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.upload-result-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.upload-result-size {
+  font-size: 10px;
+  color: var(--text-dimmed);
+  flex-shrink: 0;
+}
+
+.upload-result-status {
+  font-size: 11px;
+  color: var(--text-dimmed);
+  margin-top: 4px;
+}
+
+.upload-result-item.done .upload-result-status {
+  color: #38ef7d;
+}
+
+.upload-result-item.failed .upload-result-status {
+  color: #ef4444;
+}
+
+.upload-result-item.uploading .upload-result-status {
+  color: #4a9eff;
+}
+
+.upload-result-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.upload-result-actions:empty {
+  display: none;
+}
+
+.upload-result-link {
+  font-size: 10px;
+  color: #4a9eff;
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.upload-result-link:hover {
+  text-decoration: underline;
+}
+
+.upload-result-copy,
+.upload-result-retry {
+  font-size: 10px;
+  padding: 4px 10px;
+  flex-shrink: 0;
+}
+
+/* Two-step destructive confirm (F-M3) */
+button.confirm-armed {
+  background: rgba(239, 68, 68, 0.15) !important;
+  color: #ef4444 !important;
+  border-color: rgba(239, 68, 68, 0.4) !important;
+}

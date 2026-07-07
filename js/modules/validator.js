@@ -5,6 +5,7 @@
  */
 
 import { logWarning } from './errorLogger.js';
+import { getEffectiveMimeType } from './mimeFallback.js';
 
 /**
  * Maximum file size in bytes (300MB)
@@ -100,9 +101,14 @@ export function validateFile(file, options = {}) {
     return { valid: false, error: 'File is empty' };
   }
 
-  // Check MIME type if allowedTypes specified
-  if (allowedTypes && !allowedTypes.has(file.type)) {
-    return { valid: false, error: `File type ${file.type} is not allowed` };
+  // Check MIME type if allowedTypes specified. Uses the effective MIME type,
+  // which falls back to the filename extension when the browser reports an
+  // empty type (FR-1 — common for .mov/.mkv on Windows).
+  if (allowedTypes) {
+    const effectiveType = getEffectiveMimeType(file);
+    if (!allowedTypes.has(effectiveType)) {
+      return { valid: false, error: `File type ${effectiveType || 'unknown'} is not allowed` };
+    }
   }
 
   return { valid: true };

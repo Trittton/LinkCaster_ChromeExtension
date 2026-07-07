@@ -64,15 +64,14 @@ def build_extension():
             print(f"  - js/ (NOT FOUND)", file=sys.stderr)
             return False
 
-        # Add icons directory
+        # Add icons directory (optional — manifest references extension_icon.png at root)
         icons_dir = project_root / "icons"
         if icons_dir.exists():
             for icon_file in icons_dir.glob("*.png"):
                 zipf.write(icon_file, f"icons/{icon_file.name}")
                 print(f"  + icons/{icon_file.name}")
         else:
-            print(f"  - icons/ (NOT FOUND)", file=sys.stderr)
-            return False
+            print("  ~ icons/ not present, skipping (manifest uses extension_icon.png)")
 
     # Display success message
     size_kb = zip_path.stat().st_size / 1024

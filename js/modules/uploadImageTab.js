@@ -10,7 +10,13 @@ import { showStatus, updateProgress, formatDate, createHistoryItemHtml, createFi
 import { getStorage, setStorage, addToHistory, getHistory, clearHistory, getFolderHandle, saveFolderHandle } from './storage.js';
 import { scanFolder, requestFolderPermission, checkFolderPermission } from './fileMonitoring.js';
 import { uploadToCatbox, uploadToGoogleDrive, uploadToVgy } from './uploadServices.js';
-import { getCurrentTab } from './tabs.js';
+import { createUploadResults } from './uploadResults.js';
+
+/**
+ * Per-file upload results controller ("bubbles", FR-3)
+ * @type {ReturnType<typeof createUploadResults>|null}
+ */
+let imageResults = null;
 
 /**
  * Gets the status element for this tab
@@ -44,6 +50,9 @@ let detectedImageFiles = new Map();
  */
 export async function initUploadImageTab() {
   const elements = getElements();
+  if (elements.resultsList) {
+    imageResults = createUploadResults(elements.resultsList);
+  }
   await loadSettings(elements);
   await loadFolderHandle();
   await loadUploadedFiles();
@@ -267,12 +276,13 @@ function setupEventListeners(elements) {
     elements.uploadBtn.addEventListener('click', () => handleUploadImages(elements));
   }
 
-  // Copy button
+  // Copy button (copies all uploaded URLs from the result bubbles)
   if (elements.copyBtn) {
     elements.copyBtn.addEventListener('click', async () => {
       try {
-        await navigator.clipboard.writeText(elements.outputText.value);
-        showStatus('Copied to clipboard!', StatusType.SUCCESS, getStatusElement());
+        const urls = imageResults ? imageResults.urls() : [];
+        await navigator.clipboard.writeText(urls.join('\n'));
+        showStatus(`Copied ${urls.length} link(s)!`, StatusType.SUCCESS, getStatusElement());
       } catch (error) {
         showStatus('Failed to copy', StatusType.ERROR, getStatusElement());
         await logErrorMessage('Failed to copy image links', error);
@@ -455,86 +465,81 @@ async function handleUploadImages(elements) {
   elements.uploadBtn.disabled = true;
   elements.progress.style.display = 'block';
 
-  const urls = [];
   const uploadedFilenames = [];
   // Catbox is very sensitive to parallel requests - use sequential uploads
   const CONCURRENCY_LIMIT = service === 'catbox' ? 1 : 3;
   let completed = 0;
 
+  // Render one bubble per file (FR-3)
+  imageResults.reset();
+  const fileIds = filesToUpload.map((file, i) => `${i}-${file.name}`);
+  filesToUpload.forEach((file, i) => imageResults.add(fileIds[i], file.name, file.size));
+  elements.outputSection.style.display = 'block';
+
+  // Uploads one file to the selected service and updates its bubble; used
+  // for both the initial pass and per-file Retry.
+  async function uploadSingle(file, id) {
+    const validation = validateImageFile(file);
+    if (!validation.valid) {
+      await logWarning('Image validation failed', { file: file.name, error: validation.error });
+      imageResults.setFailed(id, validation.error);
+      return { success: false, filename: file.name };
+    }
+
+    imageResults.setUploading(id);
+    try {
+      let url;
+      if (service === 'gdrive') {
+        const data = await getStorage(['googleDriveSessionId']);
+        url = await uploadToGoogleDrive(file, data.googleDriveSessionId);
+      } else if (service === 'vgy') {
+        const data = await getStorage(['vgyApiKey'], 'sync');
+        url = await uploadToVgy(file, data.vgyApiKey);
+      } else {
+        url = await uploadToCatbox(file);
+      }
+
+      await addToHistory('imageUploadHistory', {
+        fileName: file.name,
+        url: url,
+        timestamp: Date.now()
+      });
+
+      imageResults.setDone(id, url);
+      return { success: true, url, filename: file.name };
+    } catch (error) {
+      await logErrorMessage(`Failed to upload ${file.name}`, error);
+      imageResults.setFailed(id, error.message, async () => {
+        const retry = await uploadSingle(file, id);
+        if (retry.success) {
+          uploadedFiles.add(retry.filename);
+          await setStorage({ uploadedImageFiles: Array.from(uploadedFiles) });
+          if (imageFolderHandle) await updateImageFiles(getElements());
+        }
+      });
+      return { success: false, filename: file.name };
+    }
+  }
+
   try {
     // Process files in batches with concurrency limit
     for (let i = 0; i < filesToUpload.length; i += CONCURRENCY_LIMIT) {
       const batch = filesToUpload.slice(i, i + CONCURRENCY_LIMIT);
+      const batchIds = fileIds.slice(i, i + CONCURRENCY_LIMIT);
 
-      const batchPromises = batch.map(async (file) => {
-        // Validate file
-        const validation = validateImageFile(file);
-        if (!validation.valid) {
-          await logWarning('Image validation failed', { file: file.name, error: validation.error });
-          return {
-            success: false,
-            url: `Error: ${file.name} - ${validation.error}`,
-            filename: file.name
-          };
-        }
-
-        try {
-          let url;
-          if (service === 'gdrive') {
-            const data = await getStorage(['googleDriveSessionId']);
-            url = await uploadToGoogleDrive(file, data.googleDriveSessionId);
-          } else if (service === 'vgy') {
-            const data = await getStorage(['vgyApiKey'], 'sync');
-            url = await uploadToVgy(file, data.vgyApiKey);
-          } else {
-            url = await uploadToCatbox(file);
-          }
-
-          // Add to history
-          await addToHistory('imageUploadHistory', {
-            fileName: file.name,
-            url: url,
-            timestamp: Date.now()
-          });
-
-          return {
-            success: true,
-            url: url,
-            filename: file.name
-          };
-        } catch (error) {
-          await logErrorMessage(`Failed to upload ${file.name}`, error);
-          return {
-            success: false,
-            url: `Error: ${file.name} - ${error.message}`,
-            filename: file.name
-          };
-        }
-      });
-
-      // Wait for all uploads in the batch to complete
-      const batchResults = await Promise.allSettled(batchPromises);
+      const batchResults = await Promise.allSettled(
+        batch.map((file, batchIndex) => uploadSingle(file, batchIds[batchIndex]))
+      );
 
       for (const settledResult of batchResults) {
         completed++;
         updateProgress(completed, filesToUpload.length, `Uploaded ${completed}/${filesToUpload.length}`, elements.progressFill, elements.progressText);
 
-        if (settledResult.status === 'fulfilled') {
-          const result = settledResult.value;
-          urls.push(result.url);
-          if (result.success) {
-            uploadedFilenames.push(result.filename);
-          }
-        } else {
-          // Handle rejected promise
-          urls.push(`Error: Upload failed - ${settledResult.reason?.message || 'Unknown error'}`);
+        if (settledResult.status === 'fulfilled' && settledResult.value.success) {
+          uploadedFilenames.push(settledResult.value.filename);
         }
       }
     }
-
-    // Reverse so older uploads appear first, newer at the end
-    elements.outputText.value = urls.reverse().join('\n');
-    elements.outputSection.style.display = 'block';
 
     // Mark files as uploaded
     uploadedFilenames.forEach(filename => uploadedFiles.add(filename));
@@ -550,7 +555,7 @@ async function handleUploadImages(elements) {
       elements.fileInput.value = '';
     }
 
-    const successCount = urls.filter(u => !u.startsWith('Error')).length;
+    const successCount = uploadedFilenames.length;
     showStatus(`Successfully uploaded ${successCount}/${filesToUpload.length} images!`, StatusType.SUCCESS, getStatusElement());
 
     setTimeout(() => {
@@ -733,7 +738,7 @@ function getElements() {
     progressFill: document.getElementById('image-progress-fill'),
     progressText: document.getElementById('image-progress-text'),
     outputSection: document.getElementById('image-output-section'),
-    outputText: document.getElementById('image-output-text'),
+    resultsList: document.getElementById('image-results'),
     copyBtn: document.getElementById('image-copy-btn'),
     gdriveConnection: document.getElementById('image-gdrive-connection'),
     gdriveConnect: document.getElementById('image-gdrive-connect'),

@@ -10,6 +10,13 @@ import { showStatus, updateProgress, formatDate, createHistoryItemHtml, createFi
 import { getStorage, setStorage, addToHistory, getHistory, clearHistory, getFolderHandle, saveFolderHandle } from './storage.js';
 import { scanFolder, requestFolderPermission, checkFolderPermission } from './fileMonitoring.js';
 import { uploadToGoogleDrive } from './uploadServices.js';
+import { createUploadResults } from './uploadResults.js';
+
+/**
+ * Per-file upload results controller ("bubbles", FR-3)
+ * @type {ReturnType<typeof createUploadResults>|null}
+ */
+let videoResults = null;
 
 /**
  * Gets the status element for this tab
@@ -43,6 +50,9 @@ let detectedVideoFiles = new Map();
  */
 export async function initUploadVideoTab() {
   const elements = getElements();
+  if (elements.resultsList) {
+    videoResults = createUploadResults(elements.resultsList);
+  }
   await loadSettings(elements);
   await loadFolderHandle();
   await loadUploadedFiles();
@@ -257,15 +267,16 @@ function setupEventListeners(elements) {
     elements.uploadBtn.addEventListener('click', () => handleUploadVideo(elements));
   }
 
-  // Copy button
+  // Copy button (copies all uploaded URLs from the result bubbles)
   if (elements.copyBtn) {
     elements.copyBtn.addEventListener('click', async () => {
       try {
-        await navigator.clipboard.writeText(elements.outputText.value);
-        showStatus('Copied to clipboard!', StatusType.SUCCESS, getStatusElement());
+        const urls = videoResults ? videoResults.urls() : [];
+        await navigator.clipboard.writeText(urls.join('\n'));
+        showStatus(`Copied ${urls.length} link(s)!`, StatusType.SUCCESS, getStatusElement());
       } catch (error) {
         showStatus('Failed to copy', StatusType.ERROR, getStatusElement());
-        await logErrorMessage('Failed to copy video link', error);
+        await logErrorMessage('Failed to copy video links', error);
       }
     });
   }
@@ -351,9 +362,9 @@ async function updateVideoFiles(elements) {
 async function handleUploadVideo(elements) {
   const filesToUpload = [];
 
-  // Add file from file input
+  // Add files from file input (multi-select supported, FR-3)
   if (elements.fileInput.files && elements.fileInput.files.length > 0) {
-    filesToUpload.push(elements.fileInput.files[0]);
+    filesToUpload.push(...Array.from(elements.fileInput.files));
   }
 
   // Add ALL checked files from detected files
@@ -429,12 +440,56 @@ async function handleUploadVideo(elements) {
   elements.uploadBtn.disabled = true;
   elements.progress.style.display = 'block';
 
-  const uploadedUrls = [];
-  const CONCURRENCY_LIMIT = 2; // Upload 2 videos at a time (videos are larger)
+  // Memory guard: large videos travel base64-encoded through the extension
+  // message channel — upload big files one at a time (FR-3/FR-6 note).
+  const LARGE_FILE_BYTES = 40 * 1024 * 1024;
+  const CONCURRENCY_LIMIT = filesToUpload.some(f => f.size > LARGE_FILE_BYTES) ? 1 : 2;
+
   let successCount = 0;
   let failedCount = 0;
   let completed = 0;
   let sessionExpired = false;
+
+  // Render one bubble per file (FR-3)
+  videoResults.reset();
+  const fileIds = filesToUpload.map((file, i) => `${i}-${file.name}`);
+  filesToUpload.forEach((file, i) => videoResults.add(fileIds[i], file.name, file.size));
+  elements.outputSection.style.display = 'block';
+
+  // Uploads one file and updates its bubble; used for both the initial pass
+  // and per-file Retry.
+  async function uploadSingle(file, id) {
+    videoResults.setUploading(id);
+    try {
+      const url = await uploadToGoogleDrive(file, data.googleDriveSessionId);
+
+      await addToHistory('videoUploadHistory', {
+        fileName: file.name,
+        url: url,
+        timestamp: Date.now()
+      });
+
+      videoResults.setDone(id, url);
+      await logInfo('Video upload completed', { file: file.name });
+      return { success: true, url, filename: file.name };
+    } catch (error) {
+      await logErrorMessage(`Video upload failed for ${file.name}`, error);
+
+      if (error.message === 'GOOGLE_DRIVE_SESSION_EXPIRED') {
+        videoResults.setFailed(id, 'Google Drive session expired');
+        throw error; // Handled at batch level
+      }
+
+      videoResults.setFailed(id, error.message, async () => {
+        const retry = await uploadSingle(file, id);
+        if (retry.success) {
+          uploadedVideoFiles.add(retry.filename);
+          await setStorage({ uploadedVideoFiles: Array.from(uploadedVideoFiles) });
+        }
+      });
+      return { success: false, error: error.message, filename: file.name };
+    }
+  }
 
   try {
     // Process files in batches with concurrency limit
@@ -442,73 +497,30 @@ async function handleUploadVideo(elements) {
       if (sessionExpired) break;
 
       const batch = filesToUpload.slice(i, i + CONCURRENCY_LIMIT);
-      const currentBatchStart = i;
+      const batchIds = fileIds.slice(i, i + CONCURRENCY_LIMIT);
 
-      const batchPromises = batch.map(async (file, batchIndex) => {
-        const fileIndex = currentBatchStart + batchIndex;
-        const currentIndex = fileIndex + 1;
-        const total = filesToUpload.length;
+      const batchResults = await Promise.allSettled(
+        batch.map((file, batchIndex) => uploadSingle(file, batchIds[batchIndex]))
+      );
 
-        try {
-          const url = await uploadToGoogleDrive(file, data.googleDriveSessionId);
-
-          // Add to history
-          await addToHistory('videoUploadHistory', {
-            fileName: file.name,
-            url: url,
-            timestamp: Date.now()
-          });
-
-          await logInfo('Video upload completed', { file: file.name });
-
-          return {
-            success: true,
-            url: url,
-            filename: file.name
-          };
-        } catch (error) {
-          await logErrorMessage(`Video upload failed for ${file.name}`, error);
-
-          // Check for session expiry
-          if (error.message === 'GOOGLE_DRIVE_SESSION_EXPIRED') {
-            throw error; // Re-throw to handle at batch level
-          }
-
-          return {
-            success: false,
-            error: error.message,
-            filename: file.name
-          };
-        }
-      });
-
-      // Wait for all uploads in the batch to complete
-      const batchResults = await Promise.allSettled(batchPromises);
-
-      for (let batchIndex = 0; batchIndex < batchResults.length; batchIndex++) {
-        const settledResult = batchResults[batchIndex];
-        const file = batch[batchIndex];
+      for (const settledResult of batchResults) {
         completed++;
-
-        updateProgress(completed - 1, filesToUpload.length, `Uploading ${completed}/${filesToUpload.length}: ${file.name}...`, elements.progressFill, elements.progressText);
+        updateProgress(completed, filesToUpload.length, `Uploaded ${completed}/${filesToUpload.length}`, elements.progressFill, elements.progressText);
 
         if (settledResult.status === 'fulfilled') {
           const result = settledResult.value;
           if (result.success) {
-            uploadedUrls.push(result.url);
             uploadedVideoFiles.add(result.filename);
             successCount++;
           } else {
             failedCount++;
           }
         } else {
-          // Handle session expiry
           if (settledResult.reason?.message === 'GOOGLE_DRIVE_SESSION_EXPIRED') {
             sessionExpired = true;
             await setStorage({ googleDriveConnected: false });
             await updateGDriveUI(elements);
-            showStatus('⚠️ Google Drive session expired. Please reconnect.', StatusType.ERROR, getStatusElement());
-            alert('⚠️ Google Drive session expired!\n\nPlease reconnect to Google Drive in Settings (⚙️) to continue uploading.');
+            showStatus('⚠️ Google Drive session expired. Please reconnect in Settings (⚙️).', StatusType.ERROR, getStatusElement());
             break;
           }
           failedCount++;
@@ -520,13 +532,6 @@ async function handleUploadVideo(elements) {
 
     // Save uploaded files list
     await setStorage({ uploadedVideoFiles: Array.from(uploadedVideoFiles) });
-
-    // Show results
-    if (uploadedUrls.length > 0) {
-      // Reverse so older uploads appear first, newer at the end
-      elements.outputText.value = uploadedUrls.reverse().join('\n');
-      elements.outputSection.style.display = 'block';
-    }
 
     // Refresh list
     if (videoFolderHandle) {
@@ -711,7 +716,7 @@ function getElements() {
     progressFill: document.getElementById('video-progress-fill'),
     progressText: document.getElementById('video-progress-text'),
     outputSection: document.getElementById('video-output-section'),
-    outputText: document.getElementById('video-output-text'),
+    resultsList: document.getElementById('video-results'),
     copyBtn: document.getElementById('video-copy-btn'),
     uploadSection: document.getElementById('gdrive-upload-section')
   };

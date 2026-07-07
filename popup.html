@@ -196,8 +196,8 @@
         </div>
 
         <div class="output-section" id="image-output-section" style="display: none;">
-          <label>Image Links</label>
-          <textarea id="image-output-text" rows="6" readonly></textarea>
+          <label>Uploaded Images</label>
+          <div id="image-results" class="upload-results"></div>
           <button id="image-copy-btn" class="primary">Copy All Links</button>
         </div>
       </div>
@@ -276,8 +276,8 @@
           <div class="status" id="video-status" style="display: none;"></div>
 
           <div class="input-section">
-            <label>Select Video File (or use detected files above)</label>
-            <input type="file" id="video-file-input" accept="video/*" style="margin-bottom: 8px;">
+            <label>Select Video Files (or use detected files above)</label>
+            <input type="file" id="video-file-input" accept="video/*" multiple style="margin-bottom: 8px;">
             <button id="upload-video-btn" class="primary" style="width: 100%;">Upload to Google Drive</button>
           </div>
 
@@ -289,9 +289,9 @@
           </div>
 
           <div class="output-section" id="video-output-section" style="display: none;">
-            <label>Video Link</label>
-            <textarea id="video-output-text" rows="3" readonly></textarea>
-            <button id="video-copy-btn" class="primary">Copy Link</button>
+            <label>Uploaded Videos</label>
+            <div id="video-results" class="upload-results"></div>
+            <button id="video-copy-btn" class="primary">Copy All Links</button>
           </div>
         </div>
       </div>

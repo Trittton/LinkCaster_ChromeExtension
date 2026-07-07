@@ -6,6 +6,7 @@
 
 import { logErrorMessage, logWarning } from './errorLogger.js';
 import { isValidTimeFilter } from './validator.js';
+import { getEffectiveMimeType, isMediaCategory } from './mimeFallback.js';
 
 /**
  * Scans a folder for files matching criteria
@@ -37,18 +38,19 @@ export async function scanFolder(folderHandle, fileType, timeFilterMinutes, uplo
     const files = [];
     const now = Date.now();
     const timeLimit = timeFilterMinutes * 60 * 1000;
+    let skippedByType = 0;
 
     for await (const entry of folderHandle.values()) {
       if (entry.kind === 'file') {
         try {
           const file = await entry.getFile();
 
-          // Check file type
-          const isCorrectType = fileType === 'image'
-            ? file.type.startsWith('image/')
-            : file.type.startsWith('video/');
-
-          if (!isCorrectType) continue;
+          // Check file type using effective MIME (falls back to the filename
+          // extension when the OS registry reports no type — FR-1)
+          if (!isMediaCategory(file, fileType)) {
+            skippedByType++;
+            continue;
+          }
 
           // Check file age
           const fileAge = now - file.lastModified;
@@ -59,12 +61,17 @@ export async function scanFolder(folderHandle, fileType, timeFilterMinutes, uplo
             file: file,
             lastModified: file.lastModified,
             size: file.size,
+            type: getEffectiveMimeType(file),
             uploaded: uploadedFiles.has(file.name)
           });
         } catch (fileError) {
           await logWarning(`Failed to read file entry in folder`, fileError);
         }
       }
+    }
+
+    if (skippedByType > 0) {
+      console.log(`scanFolder: skipped ${skippedByType} file(s) not matching type "${fileType}"`);
     }
 
     // Sort by most recent first

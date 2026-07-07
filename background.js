@@ -17,7 +17,6 @@ chrome.runtime.onInstalled.addListener(() => {
 
 // Backend URL for Google Drive OAuth
 const BACKEND_URL = 'https://web-production-674b.up.railway.app';
-let currentSession = null;
 
 // Listen for messages from popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -60,6 +59,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
   }
+
+  if (request.action === 'fetchMediaViaBackend') {
+    fetchMediaViaBackend(request.url)
+      .then(result => sendResponse(result))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
 });
 
 // ===== Google Drive OAuth and Upload =====
@@ -70,8 +76,6 @@ async function handleGoogleDriveOAuth() {
 
     const startResponse = await fetch(`${BACKEND_URL}/auth/google/start`);
     const { authUrl, sessionId } = await startResponse.json();
-
-    currentSession = sessionId;
 
     try {
       await chrome.identity.launchWebAuthFlow({
@@ -121,17 +125,6 @@ async function handleGoogleDriveOAuth() {
   } catch (error) {
     console.error('Google Drive OAuth error:', error);
     return { success: false, error: error.message };
-  }
-}
-
-async function verifyGoogleDriveSession(sessionId) {
-  try {
-    const verifyResponse = await fetch(`${BACKEND_URL}/auth/verify/${sessionId}`);
-    const verifyData = await verifyResponse.json();
-    return verifyData.authenticated === true;
-  } catch (error) {
-    console.error('Session verification error:', error);
-    return false;
   }
 }
 
@@ -314,8 +307,7 @@ async function handleGoogleDriveUpload(fileData, fileName, sessionId) {
     ]);
 
     if (!storage.googleDriveAccessToken) {
-      console.log('No local tokens found, using server-side session...');
-      return await uploadViaServerSession(fileData, fileName, sessionId);
+      throw new Error('Not connected to Google Drive. Please reconnect in settings.');
     }
 
     // Refresh token if expired or expiring soon (within 5 minutes)
@@ -412,6 +404,11 @@ async function handleGoogleDriveUpload(fileData, fileName, sessionId) {
 
     const directUrl = `https://drive.google.com/file/d/${fileId}/view`;
 
+    // FR-4: nudge Google's preview-processing queue for videos (best effort).
+    if (mimeType.startsWith('video/')) {
+      warmUpDrivePreview(fileId, storage.googleDriveAccessToken).catch(() => {});
+    }
+
     console.log('Upload successful:', directUrl);
     return { success: true, url: directUrl, fileId: fileId };
   } catch (error) {
@@ -420,46 +417,60 @@ async function handleGoogleDriveUpload(fileData, fileName, sessionId) {
   }
 }
 
-// Fallback function when no local tokens are available
-async function uploadViaServerSession(fileData, fileName, sessionId) {
+// FR-4: Google transcodes videos asynchronously after upload and exposes no
+// API to expedite it. Requesting the thumbnail mimics the "user clicked the
+// preview" signal that appears to re-trigger processing. Best effort only.
+async function warmUpDrivePreview(fileId, accessToken) {
   try {
-    console.log('Using server-side upload fallback...');
+    const metaResponse = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${fileId}?fields=thumbnailLink`,
+      { headers: { 'Authorization': `Bearer ${accessToken}` } }
+    );
+    if (!metaResponse.ok) return;
 
-    // Get current access token from Chrome storage
-    const storage = await chrome.storage.local.get(['googleDriveAccessToken', 'googleDriveTokenExpiry']);
-    let accessToken = storage.googleDriveAccessToken;
-
-    // Refresh if expired or expiring within 1 minute
-    if (!accessToken || Date.now() >= (storage.googleDriveTokenExpiry - 60 * 1000)) {
-      accessToken = await refreshGoogleDriveToken();
+    const meta = await metaResponse.json();
+    if (meta.thumbnailLink) {
+      await fetch(meta.thumbnailLink, { credentials: 'omit' });
+      console.log('[Background] Drive preview warm-up ping sent for', fileId);
     }
-
-    const uploadResponse = await fetch(`${BACKEND_URL}/api/upload`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        accessToken: accessToken,
-        fileData: fileData,
-        filename: fileName
-      })
-    });
-
-    const result = await uploadResponse.json();
-
-    if (!uploadResponse.ok) {
-      if (uploadResponse.status === 401) {
-        throw new Error('Unauthorized: Invalid session ID. Please reconnect to Google Drive.');
-      }
-      throw new Error(result.error || 'Upload failed');
-    }
-
-    return { success: true, url: result.url, fileId: result.fileId };
   } catch (error) {
-    console.error('Server-side upload error:', error);
-    throw error;
+    console.log('[Background] Preview warm-up failed (non-fatal):', error.message);
   }
+}
+
+// FR-2: relay image bytes through the backend for networks that block the
+// Lightshot CDN. Returns a data URL (blobs cannot cross the message channel).
+async function fetchMediaViaBackend(url) {
+  const response = await fetch(`${BACKEND_URL}/api/fetch-media`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url }),
+    signal: AbortSignal.timeout(45000)
+  });
+
+  if (!response.ok) {
+    let message = `Backend media fetch failed: ${response.status}`;
+    try {
+      const data = await response.json();
+      if (data.error) message = data.error;
+    } catch { /* non-JSON error body */ }
+    throw new Error(message);
+  }
+
+  const blob = await response.blob();
+  // Keep relayed files well under the ~32MB extension message limit.
+  if (blob.size > 20 * 1024 * 1024) {
+    throw new Error('Relayed file too large');
+  }
+
+  const dataUrl = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+
+  return { success: true, dataUrl };
 }
 
 // ===== Lightshot Image Extraction =====
@@ -468,31 +479,47 @@ async function extractLightshotImage(url) {
   try {
     console.log('[Background] Extracting image from Lightshot URL:', url);
 
-    // Try backend API extraction first
+    // Tier 1: direct fetch from the user's browser (free, fast for users
+    // whose network doesn't block Lightshot).
     try {
-      console.log('[Background] Attempting backend API extraction...');
-      const apiResponse = await fetch(`${BACKEND_URL}/api/extract-lightshot`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ url: url }),
-        signal: AbortSignal.timeout(10000)
-      });
-
-      if (apiResponse.ok) {
-        const data = await apiResponse.json();
-        if (data.success && data.imageUrl) {
-          console.log('[Background] Backend API extracted image URL:', data.imageUrl);
-          return { success: true, imageUrl: data.imageUrl };
-        }
+      const directResult = await extractLightshotDirect(url);
+      if (directResult) {
+        return { success: true, imageUrl: directResult };
       }
-      console.log('[Background] Backend API extraction failed, trying direct fetch...');
-    } catch (apiError) {
-      console.log('[Background] Backend API not available:', apiError.message);
+    } catch (directError) {
+      console.log('[Background] Direct extraction failed:', directError.message);
     }
 
-    // Try fetching with realistic browser headers
+    // Tier 2: backend extraction — the server retries direct and then falls
+    // back to its proxy for networks where Lightshot is blocked (FR-2).
+    console.log('[Background] Trying backend API extraction...');
+    const apiResponse = await fetch(`${BACKEND_URL}/api/extract-lightshot`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ url: url }),
+      signal: AbortSignal.timeout(30000)
+    });
+
+    if (apiResponse.ok) {
+      const data = await apiResponse.json();
+      if (data.success && data.imageUrl) {
+        console.log('[Background] Backend API extracted image URL:', data.imageUrl);
+        return { success: true, imageUrl: data.imageUrl };
+      }
+    }
+
+    return { success: false, error: 'Could not extract image — the screenshot may be deleted' };
+  } catch (error) {
+    console.error('[Background] Lightshot extraction error:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+// Direct (browser-side) Lightshot page fetch + og:image extraction.
+// Returns the image URL or null when the page yields no match.
+async function extractLightshotDirect(url) {
     const response = await fetch(url, {
       method: 'GET',
       headers: {
@@ -549,17 +576,12 @@ async function extractLightshotImage(url) {
         }
 
         console.log(`[Background] Found image URL with pattern ${i}:`, imageUrl);
-        return { success: true, imageUrl: imageUrl };
+        return imageUrl;
       }
     }
 
     console.log('[Background] No image URL found in HTML');
-    return { success: false, error: 'Could not find image URL in page' };
-
-  } catch (error) {
-    console.error('[Background] Lightshot extraction error:', error);
-    return { success: false, error: error.message };
-  }
+    return null;
 }
 
 // ===== iCloud Media Extraction =====

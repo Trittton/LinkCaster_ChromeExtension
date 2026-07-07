@@ -56,37 +56,6 @@ export function updateProgress(current, total, message, progressFill, progressTe
 }
 
 /**
- * Updates theme icon based on current theme
- * @param {string} theme - Current theme ('dark' or 'light')
- * @param {HTMLElement} [themeToggle] - Theme toggle button
- * @returns {void}
- */
-export function updateThemeIcon(theme, themeToggle = null) {
-  const toggle = themeToggle || document.getElementById('theme-toggle');
-  if (!toggle) return;
-
-  const icon = toggle.querySelector('.theme-icon');
-  if (icon) {
-    icon.textContent = theme === 'dark' ? '☀️' : '🌙';
-  }
-}
-
-/**
- * Copies text to clipboard
- * @param {string} text - Text to copy
- * @returns {Promise<boolean>} True if successful
- */
-export async function copyToClipboard(text) {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch (error) {
-    console.error('Failed to copy to clipboard:', error);
-    return false;
-  }
-}
-
-/**
  * Formats a date for display
  * @param {number} timestamp - Timestamp in milliseconds
  * @returns {string} Formatted date string
@@ -188,70 +157,3 @@ export function createFileItemHtml(fileInfo, wasChecked = false) {
   `;
 }
 
-/**
- * Shows or hides an element
- * @param {HTMLElement} element - Element to toggle
- * @param {boolean} show - Whether to show the element
- * @returns {void}
- */
-export function toggleElement(element, show) {
-  if (!element) return;
-  element.style.display = show ? 'block' : 'none';
-}
-
-/**
- * Enables or disables a button
- * @param {HTMLElement} button - Button element
- * @param {boolean} enabled - Whether button should be enabled
- * @param {string} [loadingText] - Optional loading text to display when disabled
- * @returns {void}
- */
-export function setButtonState(button, enabled, loadingText = null) {
-  if (!button) return;
-
-  button.disabled = !enabled;
-
-  if (!enabled && loadingText) {
-    button.dataset.originalText = button.textContent;
-    button.textContent = loadingText;
-  } else if (enabled && button.dataset.originalText) {
-    button.textContent = button.dataset.originalText;
-    delete button.dataset.originalText;
-  }
-}
-
-/**
- * Confirms action with user
- * @param {string} message - Confirmation message
- * @returns {boolean} True if user confirmed
- */
-export function confirmAction(message) {
-  return confirm(message);
-}
-
-/**
- * Shows an alert to the user
- * @param {string} message - Alert message
- * @returns {void}
- */
-export function showAlert(message) {
-  alert(message);
-}
-
-/**
- * Debounces a function call
- * @param {Function} func - Function to debounce
- * @param {number} wait - Wait time in milliseconds
- * @returns {Function} Debounced function
- */
-export function debounce(func, wait) {
-  let timeout;
-  return function executedFunction(...args) {
-    const later = () => {
-      clearTimeout(timeout);
-      func(...args);
-    };
-    clearTimeout(timeout);
-    timeout = setTimeout(later, wait);
-  };
-}

@@ -56,9 +56,11 @@ LinkCaster requests the following browser permissions:
 | Permission | Purpose |
 |------------|---------|
 | `storage` | Save your settings and preferences locally |
-| `activeTab` | Access the current tab only when you click the extension |
 | `identity` | Authenticate with Google Drive (OAuth) |
-| `nativeMessaging` | Required for file system access |
+
+The extension also requests host access only to the specific services it works
+with (Lightshot, Catbox.moe, vgy.me, Google Drive APIs, and the LinkCaster
+OAuth backend) — no broad web access.
 
 ## Data Security
 

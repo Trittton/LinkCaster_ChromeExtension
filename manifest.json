@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "LinkCaster",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Convert share links to direct downloadable URLs and upload files to cloud storage providers.",
   "permissions": [
     "storage",
