@@ -10,6 +10,53 @@ import { initConvertTab, updateApiUI, updateConvertGDriveStatus } from './module
 import { initUploadImageTab, updateImageGDriveStatus } from './modules/uploadImageTab.js';
 import { initUploadVideoTab, updateGDriveUI, updateGDriveStatus } from './modules/uploadVideoTab.js';
 import { logInfo, logErrorMessage } from './modules/errorLogger.js';
+import { API_ENDPOINTS } from './modules/constants.js';
+
+/**
+ * Returns true when version a is below version b (dotted numeric versions)
+ * @param {string} a - Version to test
+ * @param {string} b - Version to compare against
+ * @returns {boolean}
+ */
+function isVersionBelow(a, b) {
+  const pa = String(a).split('.').map(Number);
+  const pb = String(b).split('.').map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] || 0;
+    const y = pb[i] || 0;
+    if (x !== y) return x < y;
+  }
+  return false;
+}
+
+/**
+ * Version handshake: asks the backend which extension version is still
+ * supported and shows an update banner when this install is too old.
+ * Fails silently (offline, old backend without /health).
+ * @returns {Promise<void>}
+ */
+async function checkMinimumVersion() {
+  try {
+    const response = await fetch(`${API_ENDPOINTS.BACKEND}/health`, {
+      signal: AbortSignal.timeout(5000)
+    });
+    if (!response.ok) return;
+
+    const data = await response.json();
+    const current = chrome.runtime.getManifest().version;
+
+    if (data.minExtensionVersion && isVersionBelow(current, data.minExtensionVersion)) {
+      const banner = document.createElement('div');
+      banner.className = 'status warning';
+      banner.style.display = 'block';
+      banner.textContent = `LinkCaster ${current} is outdated and may not work correctly. Chrome updates it automatically soon — to update now, restart Chrome or click "Update" at chrome://extensions.`;
+      document.querySelector('.container')?.prepend(banner);
+      await logInfo('Version banner shown', { current, min: data.minExtensionVersion });
+    }
+  } catch {
+    // Backend unreachable or predates /health — nothing to do.
+  }
+}
 
 /**
  * Gets all DOM element references for Convert tab
@@ -124,6 +171,9 @@ async function init() {
 
     // Setup storage change listener
     chrome.storage.onChanged.addListener(handleStorageChange);
+
+    // Version handshake with the backend (fire and forget)
+    checkMinimumVersion();
 
     await logInfo('LinkCaster popup initialized successfully');
   } catch (error) {

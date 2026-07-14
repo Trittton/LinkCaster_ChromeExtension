@@ -11,12 +11,19 @@ import { getStorage, setStorage, addToHistory, getHistory, clearHistory, getFold
 import { scanFolder, requestFolderPermission, checkFolderPermission } from './fileMonitoring.js';
 import { uploadToGoogleDrive } from './uploadServices.js';
 import { createUploadResults } from './uploadResults.js';
+import { createPendingFiles } from './pendingFiles.js';
 
 /**
  * Per-file upload results controller ("bubbles", FR-3)
  * @type {ReturnType<typeof createUploadResults>|null}
  */
 let videoResults = null;
+
+/**
+ * Accumulating attachment list for the file picker (FR-3)
+ * @type {ReturnType<typeof createPendingFiles>|null}
+ */
+let videoPending = null;
 
 /**
  * Gets the status element for this tab
@@ -52,6 +59,9 @@ export async function initUploadVideoTab() {
   const elements = getElements();
   if (elements.resultsList) {
     videoResults = createUploadResults(elements.resultsList);
+  }
+  if (elements.pendingList) {
+    videoPending = createPendingFiles(elements.pendingList);
   }
   await loadSettings(elements);
   await loadFolderHandle();
@@ -254,6 +264,17 @@ function setupEventListeners(elements) {
     });
   }
 
+  // File picker accumulates into the pending list instead of replacing the
+  // previous selection (native inputs reset their FileList on every pick)
+  if (elements.fileInput) {
+    elements.fileInput.addEventListener('change', () => {
+      if (videoPending && elements.fileInput.files && elements.fileInput.files.length > 0) {
+        videoPending.add(elements.fileInput.files);
+        elements.fileInput.value = '';
+      }
+    });
+  }
+
   // Time filter change
   if (elements.timeFilter) {
     elements.timeFilter.addEventListener('change', async () => {
@@ -360,11 +381,14 @@ async function updateVideoFiles(elements) {
  * @returns {Promise<void>}
  */
 async function handleUploadVideo(elements) {
-  const filesToUpload = [];
+  /** @type {Array<{file: File, id: string, pendingId: string|null}>} */
+  const uploadEntries = [];
 
-  // Add files from file input (multi-select supported, FR-3)
-  if (elements.fileInput.files && elements.fileInput.files.length > 0) {
-    filesToUpload.push(...Array.from(elements.fileInput.files));
+  // Files attached via the picker, accumulated in the pending list (FR-3)
+  if (videoPending) {
+    for (const { id, file } of videoPending.entries()) {
+      uploadEntries.push({ file, id: `pend-${id}`, pendingId: id });
+    }
   }
 
   // Add ALL checked files from detected files
@@ -409,12 +433,12 @@ async function handleUploadVideo(elements) {
     for (const filename of checkedFilenames) {
       const fileInfo = detectedVideoFiles.get(filename);
       if (fileInfo && fileInfo.file) {
-        filesToUpload.push(fileInfo.file);
+        uploadEntries.push({ file: fileInfo.file, id: `det-${filename}`, pendingId: null });
       }
     }
   }
 
-  if (filesToUpload.length === 0) {
+  if (uploadEntries.length === 0) {
     showStatus('Please select at least one video file', StatusType.ERROR, getStatusElement());
     return;
   }
@@ -427,7 +451,7 @@ async function handleUploadVideo(elements) {
   }
 
   // Validate all files first
-  for (const file of filesToUpload) {
+  for (const { file } of uploadEntries) {
     const validation = validateVideoFile(file);
     if (!validation.valid) {
       showStatus(`${file.name}: ${validation.error}`, StatusType.ERROR, getStatusElement());
@@ -440,28 +464,46 @@ async function handleUploadVideo(elements) {
   elements.uploadBtn.disabled = true;
   elements.progress.style.display = 'block';
 
-  // Memory guard: large videos travel base64-encoded through the extension
-  // message channel — upload big files one at a time (FR-3/FR-6 note).
-  const LARGE_FILE_BYTES = 40 * 1024 * 1024;
-  const CONCURRENCY_LIMIT = filesToUpload.some(f => f.size > LARGE_FILE_BYTES) ? 1 : 2;
+  // FR-6: non-blocking large-file warning; uploads run in the popup, so it
+  // must stay open until they finish.
+  const oversize = uploadEntries.filter(e => e.file.size > 100 * 1024 * 1024);
+  if (oversize.length > 0) {
+    showStatus(`⚠️ ${oversize.length} file(s) over 100 MB — upload may take several minutes. Keep this popup open.`, StatusType.WARNING, getStatusElement());
+  }
+
+  const CONCURRENCY_LIMIT = 2; // Upload 2 videos at a time
 
   let successCount = 0;
   let failedCount = 0;
-  let completed = 0;
   let sessionExpired = false;
 
   // Render one bubble per file (FR-3)
   videoResults.reset();
-  const fileIds = filesToUpload.map((file, i) => `${i}-${file.name}`);
-  filesToUpload.forEach((file, i) => videoResults.add(fileIds[i], file.name, file.size));
+  uploadEntries.forEach(({ id, file }) => videoResults.add(id, file.name, file.size));
   elements.outputSection.style.display = 'block';
 
+  // Aggregate top progress bar: each file contributes 1/N. With 2 videos,
+  // one finished = 50%; first at 50% and second untouched = 25%.
+  const progressByFile = new Map(uploadEntries.map(({ id }) => [id, 0]));
+  function updateOverallProgress(label = null) {
+    let sum = 0;
+    for (const fraction of progressByFile.values()) sum += fraction;
+    const pct = Math.round((sum / uploadEntries.length) * 100);
+    updateProgress(pct, 100, label || `Uploading… ${pct}%`, elements.progressFill, elements.progressText);
+  }
+  updateOverallProgress('Starting upload…'); // reset bar from any previous run
+
   // Uploads one file and updates its bubble; used for both the initial pass
-  // and per-file Retry.
-  async function uploadSingle(file, id) {
+  // and per-file Retry. Successful pending-list files leave the list.
+  async function uploadSingle(entry) {
+    const { file, id, pendingId } = entry;
     videoResults.setUploading(id);
     try {
-      const url = await uploadToGoogleDrive(file, data.googleDriveSessionId);
+      const url = await uploadToGoogleDrive(file, data.googleDriveSessionId, (done, total) => {
+        videoResults.setUploading(id, Math.round((done / total) * 100));
+        progressByFile.set(id, done / total);
+        updateOverallProgress();
+      });
 
       await addToHistory('videoUploadHistory', {
         fileName: file.name,
@@ -470,10 +512,17 @@ async function handleUploadVideo(elements) {
       });
 
       videoResults.setDone(id, url);
+      progressByFile.set(id, 1);
+      updateOverallProgress();
+      if (pendingId && videoPending) {
+        videoPending.remove(pendingId);
+      }
       await logInfo('Video upload completed', { file: file.name });
       return { success: true, url, filename: file.name };
     } catch (error) {
       await logErrorMessage(`Video upload failed for ${file.name}`, error);
+      progressByFile.set(id, 1); // counted as processed for the bar
+      updateOverallProgress();
 
       if (error.message === 'GOOGLE_DRIVE_SESSION_EXPIRED') {
         videoResults.setFailed(id, 'Google Drive session expired');
@@ -481,7 +530,7 @@ async function handleUploadVideo(elements) {
       }
 
       videoResults.setFailed(id, error.message, async () => {
-        const retry = await uploadSingle(file, id);
+        const retry = await uploadSingle(entry);
         if (retry.success) {
           uploadedVideoFiles.add(retry.filename);
           await setStorage({ uploadedVideoFiles: Array.from(uploadedVideoFiles) });
@@ -493,20 +542,16 @@ async function handleUploadVideo(elements) {
 
   try {
     // Process files in batches with concurrency limit
-    for (let i = 0; i < filesToUpload.length; i += CONCURRENCY_LIMIT) {
+    for (let i = 0; i < uploadEntries.length; i += CONCURRENCY_LIMIT) {
       if (sessionExpired) break;
 
-      const batch = filesToUpload.slice(i, i + CONCURRENCY_LIMIT);
-      const batchIds = fileIds.slice(i, i + CONCURRENCY_LIMIT);
+      const batch = uploadEntries.slice(i, i + CONCURRENCY_LIMIT);
 
       const batchResults = await Promise.allSettled(
-        batch.map((file, batchIndex) => uploadSingle(file, batchIds[batchIndex]))
+        batch.map(entry => uploadSingle(entry))
       );
 
       for (const settledResult of batchResults) {
-        completed++;
-        updateProgress(completed, filesToUpload.length, `Uploaded ${completed}/${filesToUpload.length}`, elements.progressFill, elements.progressText);
-
         if (settledResult.status === 'fulfilled') {
           const result = settledResult.value;
           if (result.success) {
@@ -538,13 +583,8 @@ async function handleUploadVideo(elements) {
       await updateVideoFiles(elements);
     }
 
-    // Clear file input
-    if (elements.fileInput) {
-      elements.fileInput.value = '';
-    }
-
     // Show summary
-    updateProgress(filesToUpload.length, filesToUpload.length, 'Upload complete!', elements.progressFill, elements.progressText);
+    updateOverallProgress('Upload complete!');
 
     if (failedCount === 0) {
       showStatus(`All ${successCount} video(s) uploaded successfully!`, StatusType.SUCCESS, getStatusElement());
@@ -717,6 +757,7 @@ function getElements() {
     progressText: document.getElementById('video-progress-text'),
     outputSection: document.getElementById('video-output-section'),
     resultsList: document.getElementById('video-results'),
+    pendingList: document.getElementById('video-pending-files'),
     copyBtn: document.getElementById('video-copy-btn'),
     uploadSection: document.getElementById('gdrive-upload-section')
   };

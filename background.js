@@ -39,8 +39,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
-  if (request.action === 'googleDriveUpload') {
-    handleGoogleDriveUpload(request.fileData, request.fileName, request.sessionId)
+  if (request.action === 'prepareDriveUpload') {
+    prepareDriveUpload(request.mimeType)
+      .then(result => sendResponse(result))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
+
+  if (request.action === 'finalizeDriveUpload') {
+    finalizeDriveUpload(request.fileId, request.mimeType)
       .then(result => sendResponse(result))
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
@@ -65,6 +72,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       .then(result => sendResponse(result))
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
+  }
+
+  if (request.action === 'offscreenWarmupIdle') {
+    chrome.offscreen?.closeDocument().catch(() => {});
+    return;
   }
 });
 
@@ -295,127 +307,116 @@ async function getUploadFolderId(accessToken, fileType) {
   }
 }
 
-async function handleGoogleDriveUpload(fileData, fileName, sessionId) {
-  try {
-    console.log(`Uploading ${fileName} to Google Drive...`);
-    console.log('File data length:', fileData?.length);
+// Returns a valid access token, refreshing when expired or expiring within
+// 5 minutes. Throws when not connected or refresh fails.
+async function getValidAccessToken() {
+  const storage = await chrome.storage.local.get([
+    'googleDriveAccessToken',
+    'googleDriveTokenExpiry'
+  ]);
 
-    let storage = await chrome.storage.local.get([
-      'googleDriveAccessToken',
-      'googleDriveRefreshToken',
-      'googleDriveTokenExpiry'
-    ]);
-
-    if (!storage.googleDriveAccessToken) {
-      throw new Error('Not connected to Google Drive. Please reconnect in settings.');
-    }
-
-    // Refresh token if expired or expiring soon (within 5 minutes)
-    const fiveMinutesFromNow = Date.now() + (5 * 60 * 1000);
-    if (Date.now() >= storage.googleDriveTokenExpiry || fiveMinutesFromNow >= storage.googleDriveTokenExpiry) {
-      try {
-        storage.googleDriveAccessToken = await refreshGoogleDriveToken();
-      } catch (refreshError) {
-        console.error('Token refresh failed:', refreshError);
-        throw new Error('Token expired and refresh failed. Please reconnect to Google Drive.');
-      }
-    }
-
-    console.log('Uploading directly to Google Drive API...');
-
-    const base64Match = fileData.match(/^data:([^;]+);base64,(.+)$/);
-    if (!base64Match) {
-      throw new Error('Invalid base64 data format');
-    }
-
-    const mimeType = base64Match[1];
-    const base64Data = base64Match[2];
-
-    const binaryString = atob(base64Data);
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
-    }
-    const blob = new Blob([bytes], { type: mimeType });
-
-    const folderId = await getUploadFolderId(storage.googleDriveAccessToken, mimeType);
-
-    const metadata = {
-      name: fileName,
-      mimeType: mimeType
-    };
-
-    if (folderId) {
-      metadata.parents = [folderId];
-      console.log(`Uploading to folder: ${folderId}`);
-    }
-
-    const boundary = '-------314159265358979323846';
-    const delimiter = "\r\n--" + boundary + "\r\n";
-    const close_delim = "\r\n--" + boundary + "--";
-
-    const multipartBody = new Blob([
-      delimiter,
-      'Content-Type: application/json; charset=UTF-8\r\n\r\n',
-      JSON.stringify(metadata),
-      delimiter,
-      `Content-Type: ${mimeType}\r\n\r\n`,
-      blob,
-      close_delim
-    ]);
-
-    const uploadResponse = await fetch(
-      'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${storage.googleDriveAccessToken}`,
-          'Content-Type': `multipart/related; boundary="${boundary}"`
-        },
-        body: multipartBody
-      }
-    );
-
-    if (!uploadResponse.ok) {
-      const errorText = await uploadResponse.text();
-      console.error('Upload failed:', errorText);
-      throw new Error(`Upload failed: ${uploadResponse.status} ${uploadResponse.statusText}`);
-    }
-
-    const uploadData = await uploadResponse.json();
-    const fileId = uploadData.id;
-
-    console.log(`File uploaded successfully, ID: ${fileId}`);
-
-    // Make file publicly accessible
-    await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}/permissions`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${storage.googleDriveAccessToken}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        role: 'reader',
-        type: 'anyone'
-      })
-    });
-
-    console.log('File made public');
-
-    const directUrl = `https://drive.google.com/file/d/${fileId}/view`;
-
-    // FR-4: nudge Google's preview-processing queue for videos (best effort).
-    if (mimeType.startsWith('video/')) {
-      warmUpDrivePreview(fileId, storage.googleDriveAccessToken).catch(() => {});
-    }
-
-    console.log('Upload successful:', directUrl);
-    return { success: true, url: directUrl, fileId: fileId };
-  } catch (error) {
-    console.error('Google Drive upload error:', error);
-    return { success: false, error: error.message };
+  if (!storage.googleDriveAccessToken) {
+    throw new Error('Not connected to Google Drive. Please reconnect in settings.');
   }
+
+  const fiveMinutesFromNow = Date.now() + (5 * 60 * 1000);
+  if (Date.now() >= storage.googleDriveTokenExpiry || fiveMinutesFromNow >= storage.googleDriveTokenExpiry) {
+    try {
+      return await refreshGoogleDriveToken();
+    } catch (refreshError) {
+      console.error('Token refresh failed:', refreshError);
+      throw new Error('Token expired and refresh failed. Please reconnect to Google Drive.');
+    }
+  }
+
+  return storage.googleDriveAccessToken;
 }
+
+// FR-6: the popup uploads straight to Drive via the resumable protocol.
+// This handler supplies it with a fresh access token and the target folder id.
+async function prepareDriveUpload(mimeType) {
+  const accessToken = await getValidAccessToken();
+  const folderId = await getUploadFolderId(accessToken, mimeType || '');
+  return { success: true, accessToken, folderId };
+}
+
+// FR-6: finalizes a popup-side upload — makes the file link-shareable and
+// fires the preview warm-up for videos.
+async function finalizeDriveUpload(fileId, mimeType) {
+  const accessToken = await getValidAccessToken();
+
+  const permResponse = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}/permissions`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      role: 'reader',
+      type: 'anyone'
+    })
+  });
+
+  if (!permResponse.ok) {
+    console.error('Failed to make file shareable:', permResponse.status);
+  }
+
+  // FR-4: nudge Google's preview-processing queue for videos (best effort).
+  // Primary: an offscreen document loads the Drive embed player invisibly —
+  // a real playback attempt that works even after the popup closes.
+  // Secondary: delayed thumbnail pings via alarms.
+  if (mimeType && mimeType.startsWith('video/')) {
+    warmUpViaOffscreen(fileId).catch(error =>
+      console.log('[Background] Offscreen warm-up failed:', error.message)
+    );
+    warmUpDrivePreview(fileId, accessToken).catch(() => {});
+    scheduleWarmupRetries(fileId);
+  }
+
+  const url = `https://drive.google.com/file/d/${fileId}/view`;
+  console.log('Upload finalized:', url);
+  return { success: true, url, fileId };
+}
+
+// FR-4: creates (or reuses) the offscreen document and asks it to load the
+// Drive embed player for the uploaded file. Chrome allows one offscreen
+// document per extension; it reports back when idle so we can close it.
+async function warmUpViaOffscreen(fileId) {
+  if (!chrome.offscreen) return;
+
+  try {
+    await chrome.offscreen.createDocument({
+      url: 'offscreen.html',
+      reasons: ['IFRAME_SCRIPTING'],
+      justification: 'Loads the Google Drive embed player invisibly so uploaded videos start preview processing without user interaction'
+    });
+  } catch (error) {
+    // "Only a single offscreen document may be created" — already open, reuse it.
+    if (!String(error.message).toLowerCase().includes('single offscreen')) {
+      throw error;
+    }
+  }
+
+  await chrome.runtime.sendMessage({ action: 'offscreenDriveWarmup', fileId }).catch(() => {});
+  console.log('[Background] Offscreen warm-up requested for', fileId);
+}
+
+// FR-4: service workers are killed after ~30s idle, so delayed retries use
+// chrome.alarms instead of setTimeout.
+function scheduleWarmupRetries(fileId) {
+  if (!chrome.alarms) return;
+  chrome.alarms.create(`drive-warmup:${fileId}:1`, { delayInMinutes: 1 });
+  chrome.alarms.create(`drive-warmup:${fileId}:2`, { delayInMinutes: 4 });
+}
+
+chrome.alarms?.onAlarm.addListener((alarm) => {
+  if (!alarm.name.startsWith('drive-warmup:')) return;
+  const fileId = alarm.name.split(':')[1];
+
+  getValidAccessToken()
+    .then(accessToken => warmUpDrivePreview(fileId, accessToken))
+    .catch(error => console.log('[Background] Warm-up retry skipped:', error.message));
+});
 
 // FR-4: Google transcodes videos asynchronously after upload and exposes no
 // API to expedite it. Requesting the thumbnail mimics the "user clicked the

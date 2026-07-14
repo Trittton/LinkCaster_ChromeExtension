@@ -74,14 +74,15 @@ export function createUploadResults(container) {
   }
 
   /**
-   * Marks a file as uploading.
+   * Marks a file as uploading, optionally with byte-level progress (FR-6).
    * @param {string} id - File id
+   * @param {number|null} [percent] - Progress percentage (0-100), or null for indeterminate
    */
-  function setUploading(id) {
+  function setUploading(id, percent = null) {
     const item = items.get(id);
     if (!item) return;
     item.el.className = 'upload-result-item uploading';
-    item.statusEl.textContent = 'Uploading…';
+    item.statusEl.textContent = percent === null ? 'Uploading…' : `Uploading… ${percent}%`;
   }
 
   /**

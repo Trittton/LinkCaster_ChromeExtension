@@ -6,22 +6,14 @@
 
 import { logErrorMessage, logInfo, withErrorLogging } from './errorLogger.js';
 import { sanitizeFilename } from './validator.js';
-import { getStorage, setStorage } from './storage.js';
+import { setStorage } from './storage.js';
 import { getEffectiveMimeType } from './mimeFallback.js';
 
 /**
- * Converts blob to base64 data URL
- * @param {Blob} blob - Blob to convert
- * @returns {Promise<string>} Base64 data URL
+ * Drive resumable-upload chunk size — must be a multiple of 256KiB (FR-6)
+ * @constant {number}
  */
-export function blobToBase64(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => resolve(reader.result);
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
-}
+const DRIVE_CHUNK_SIZE = 8 * 1024 * 1024;
 
 /**
  * Downloads an image from URL
@@ -294,54 +286,154 @@ export async function uploadToVgy(file, userKey) {
 }
 
 /**
- * Uploads file to Google Drive
+ * Detects auth-related failures and converts them into the session-expired
+ * sentinel error after flagging the connection as broken.
+ * @param {string} errorMessage - Error message from background/API
+ * @returns {Promise<Error>} Error to throw
+ */
+async function toUploadError(errorMessage) {
+  const authErrors = [
+    'Unauthorized',
+    'Invalid session',
+    'Token expired',
+    'refresh failed',
+    'reconnect to Google Drive',
+    'Not connected to Google Drive'
+  ];
+  const isAuthError = errorMessage && authErrors.some(err =>
+    errorMessage.toLowerCase().includes(err.toLowerCase())
+  );
+
+  if (isAuthError) {
+    await setStorage({ googleDriveConnected: false });
+    return new Error('GOOGLE_DRIVE_SESSION_EXPIRED');
+  }
+  return new Error(errorMessage || 'Google Drive upload failed');
+}
+
+/**
+ * Uploads file to Google Drive using the resumable upload protocol (FR-6).
+ * The file streams from the popup in 8MB chunks — no base64 encoding and no
+ * extension message-size ceiling (chrome.runtime messages cap at 64MiB).
+ * Note: the upload runs in the popup context; closing the popup aborts it.
  * @param {Blob|File} file - File to upload
- * @param {string} sessionId - Google Drive session ID
+ * @param {string} sessionId - Google Drive session ID (kept for compatibility)
+ * @param {Function} [onProgress] - Called with (uploadedBytes, totalBytes)
  * @returns {Promise<string>} Uploaded file URL
  */
-export async function uploadToGoogleDrive(file, sessionId) {
+export async function uploadToGoogleDrive(file, sessionId, onProgress = null) {
   const wrappedFn = withErrorLogging(async () => {
-    // Resolve MIME via extension fallback (FR-1): a file with an empty type
-    // would produce an invalid data URL and upload as untyped.
+    // Resolve MIME via extension fallback (FR-1): files with an empty
+    // browser-reported type would otherwise upload as untyped.
     const mimeType = getEffectiveMimeType(file) || file.type || 'application/octet-stream';
-    const typedBlob = file.type ? file : new Blob([file], { type: mimeType });
-
-    const fileData = await blobToBase64(typedBlob);
-
     const extension = mimeType.split('/')[1] || 'png';
     const filename = sanitizeFilename(`image_${Date.now()}.${extension}`);
 
-    const response = await chrome.runtime.sendMessage({
-      action: 'googleDriveUpload',
-      fileData: fileData,
-      fileName: filename,
-      sessionId: sessionId
-    });
-
-    if (response.success) {
-      await logInfo('Google Drive upload successful', { url: response.url });
-      return response.url;
-    } else {
-      // Check for auth-related errors
-      const authErrors = [
-        'Unauthorized',
-        'Invalid session',
-        'Token expired',
-        'refresh failed',
-        'reconnect to Google Drive'
-      ];
-      const isAuthError = response.error && authErrors.some(err =>
-        response.error.toLowerCase().includes(err.toLowerCase())
-      );
-
-      if (isAuthError) {
-        await getStorage(['googleDriveConnected']).then(() =>
-          setStorage({ googleDriveConnected: false })
-        );
-        throw new Error('GOOGLE_DRIVE_SESSION_EXPIRED');
-      }
-      throw new Error(response.error);
+    // Background supplies a fresh access token and the target folder.
+    const prep = await chrome.runtime.sendMessage({ action: 'prepareDriveUpload', mimeType });
+    if (prep === undefined) {
+      // The running service worker predates this handler (popups reload from
+      // disk on every open; the background worker only reloads with the
+      // extension itself).
+      throw new Error('Extension was updated — reload LinkCaster at chrome://extensions (↻) and try again.');
     }
+    if (!prep.success) {
+      throw await toUploadError(prep.error);
+    }
+
+    // Open a resumable upload session.
+    const metadata = { name: filename, mimeType };
+    if (prep.folderId) {
+      metadata.parents = [prep.folderId];
+    }
+
+    const initResponse = await fetch(
+      'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable',
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${prep.accessToken}`,
+          'Content-Type': 'application/json; charset=UTF-8',
+          'X-Upload-Content-Type': mimeType,
+          'X-Upload-Content-Length': String(file.size)
+        },
+        body: JSON.stringify(metadata)
+      }
+    );
+
+    if (initResponse.status === 401) {
+      throw await toUploadError('Unauthorized');
+    }
+    if (!initResponse.ok) {
+      throw new Error(`Failed to start Drive upload: ${initResponse.status}`);
+    }
+
+    const sessionUrl = initResponse.headers.get('Location');
+    if (!sessionUrl) {
+      throw new Error('Drive did not return an upload session URL');
+    }
+
+    // Send the file in chunks; each failed chunk retries with backoff.
+    let offset = 0;
+    let fileMeta = null;
+
+    while (offset < file.size) {
+      const end = Math.min(offset + DRIVE_CHUNK_SIZE, file.size);
+      const chunk = file.slice(offset, end);
+
+      let response = null;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          response = await fetch(sessionUrl, {
+            method: 'PUT',
+            headers: { 'Content-Range': `bytes ${offset}-${end - 1}/${file.size}` },
+            body: chunk
+          });
+        } catch {
+          response = null;
+        }
+
+        if (response && (response.status === 308 || response.ok)) break;
+
+        if (attempt === 3) {
+          throw new Error(`Drive chunk upload failed${response ? `: ${response.status}` : ' (network error)'}`);
+        }
+        await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, attempt - 1)));
+      }
+
+      if (response.status === 308) {
+        // Drive reports how much it actually received; continue from there.
+        const range = response.headers.get('Range');
+        offset = range ? parseInt(range.split('-')[1], 10) + 1 : end;
+      } else {
+        fileMeta = await response.json();
+        offset = file.size;
+      }
+
+      if (onProgress) {
+        onProgress(Math.min(offset, file.size), file.size);
+      }
+    }
+
+    if (!fileMeta || !fileMeta.id) {
+      throw new Error('Drive upload finished without returning a file id');
+    }
+
+    // Background makes the file link-shareable and warms up video previews.
+    const fin = await chrome.runtime.sendMessage({
+      action: 'finalizeDriveUpload',
+      fileId: fileMeta.id,
+      mimeType
+    });
+    if (fin === undefined) {
+      throw new Error('Extension was updated — reload LinkCaster at chrome://extensions (↻) and try again.');
+    }
+    if (!fin.success) {
+      throw await toUploadError(fin.error);
+    }
+
+    await logInfo('Google Drive upload successful', { url: fin.url });
+    return fin.url;
   }, 'uploadToGoogleDrive');
 
   return wrappedFn();

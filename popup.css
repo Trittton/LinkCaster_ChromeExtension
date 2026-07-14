@@ -1136,3 +1136,56 @@ button.confirm-armed {
   color: #ef4444 !important;
   border-color: rgba(239, 68, 68, 0.4) !important;
 }
+
+/* Pending attachment chips (FR-3) */
+.pending-files {
+  display: none;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.pending-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+}
+
+.pending-file-name {
+  font-size: 12px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.pending-file-size {
+  font-size: 10px;
+  color: var(--text-dimmed);
+  flex-shrink: 0;
+}
+
+.pending-file-remove {
+  background: transparent;
+  border: none;
+  color: var(--text-dimmed);
+  font-size: 12px;
+  padding: 2px 6px;
+  cursor: pointer;
+  border-radius: 4px;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.pending-file-remove:hover {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.12);
+}

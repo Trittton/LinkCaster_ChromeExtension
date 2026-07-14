@@ -36,6 +36,7 @@ def build_extension():
         "popup.html",
         "popup.css",
         "background.js",
+        "offscreen.html",
         "extension_icon.png"
     ]
 

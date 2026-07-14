@@ -11,12 +11,19 @@ import { getStorage, setStorage, addToHistory, getHistory, clearHistory, getFold
 import { scanFolder, requestFolderPermission, checkFolderPermission } from './fileMonitoring.js';
 import { uploadToCatbox, uploadToGoogleDrive, uploadToVgy } from './uploadServices.js';
 import { createUploadResults } from './uploadResults.js';
+import { createPendingFiles } from './pendingFiles.js';
 
 /**
  * Per-file upload results controller ("bubbles", FR-3)
  * @type {ReturnType<typeof createUploadResults>|null}
  */
 let imageResults = null;
+
+/**
+ * Accumulating attachment list for the file picker (FR-3)
+ * @type {ReturnType<typeof createPendingFiles>|null}
+ */
+let imagePending = null;
 
 /**
  * Gets the status element for this tab
@@ -52,6 +59,9 @@ export async function initUploadImageTab() {
   const elements = getElements();
   if (elements.resultsList) {
     imageResults = createUploadResults(elements.resultsList);
+  }
+  if (elements.pendingList) {
+    imagePending = createPendingFiles(elements.pendingList);
   }
   await loadSettings(elements);
   await loadFolderHandle();
@@ -271,6 +281,17 @@ function setupEventListeners(elements) {
     });
   }
 
+  // File picker accumulates into the pending list instead of replacing the
+  // previous selection (native inputs reset their FileList on every pick)
+  if (elements.fileInput) {
+    elements.fileInput.addEventListener('change', () => {
+      if (imagePending && elements.fileInput.files && elements.fileInput.files.length > 0) {
+        imagePending.add(elements.fileInput.files);
+        elements.fileInput.value = '';
+      }
+    });
+  }
+
   // Upload button
   if (elements.uploadBtn) {
     elements.uploadBtn.addEventListener('click', () => handleUploadImages(elements));
@@ -381,11 +402,14 @@ async function updateImageFiles(elements) {
  * @returns {Promise<void>}
  */
 async function handleUploadImages(elements) {
-  const filesToUpload = [];
+  /** @type {Array<{file: File, id: string, pendingId: string|null}>} */
+  const uploadEntries = [];
 
-  // Add files from file input
-  if (elements.fileInput.files && elements.fileInput.files.length > 0) {
-    filesToUpload.push(...Array.from(elements.fileInput.files));
+  // Files attached via the picker, accumulated in the pending list (FR-3)
+  if (imagePending) {
+    for (const { id, file } of imagePending.entries()) {
+      uploadEntries.push({ file, id: `pend-${id}`, pendingId: id });
+    }
   }
 
   // Add checked files from detected files
@@ -433,11 +457,11 @@ async function handleUploadImages(elements) {
     const filename = checkbox.dataset.filename;
     const fileInfo = detectedImageFiles.get(filename);
     if (fileInfo && fileInfo.file) {
-      filesToUpload.push(fileInfo.file);
+      uploadEntries.push({ file: fileInfo.file, id: `det-${filename}`, pendingId: null });
     }
   });
 
-  if (filesToUpload.length === 0) {
+  if (uploadEntries.length === 0) {
     showStatus('Please select at least one image', StatusType.ERROR, getStatusElement());
     return;
   }
@@ -468,21 +492,34 @@ async function handleUploadImages(elements) {
   const uploadedFilenames = [];
   // Catbox is very sensitive to parallel requests - use sequential uploads
   const CONCURRENCY_LIMIT = service === 'catbox' ? 1 : 3;
-  let completed = 0;
 
   // Render one bubble per file (FR-3)
   imageResults.reset();
-  const fileIds = filesToUpload.map((file, i) => `${i}-${file.name}`);
-  filesToUpload.forEach((file, i) => imageResults.add(fileIds[i], file.name, file.size));
+  uploadEntries.forEach(({ id, file }) => imageResults.add(id, file.name, file.size));
   elements.outputSection.style.display = 'block';
 
+  // Aggregate top progress bar: each file contributes 1/N (byte-level for
+  // Drive uploads; whole-file steps for Catbox/vgy).
+  const progressByFile = new Map(uploadEntries.map(({ id }) => [id, 0]));
+  function updateOverallProgress(label = null) {
+    let sum = 0;
+    for (const fraction of progressByFile.values()) sum += fraction;
+    const pct = Math.round((sum / uploadEntries.length) * 100);
+    updateProgress(pct, 100, label || `Uploading… ${pct}%`, elements.progressFill, elements.progressText);
+  }
+  updateOverallProgress('Starting upload…'); // reset bar from any previous run
+
   // Uploads one file to the selected service and updates its bubble; used
-  // for both the initial pass and per-file Retry.
-  async function uploadSingle(file, id) {
+  // for both the initial pass and per-file Retry. Successful pending-list
+  // files leave the list.
+  async function uploadSingle(entry) {
+    const { file, id, pendingId } = entry;
     const validation = validateImageFile(file);
     if (!validation.valid) {
       await logWarning('Image validation failed', { file: file.name, error: validation.error });
       imageResults.setFailed(id, validation.error);
+      progressByFile.set(id, 1);
+      updateOverallProgress();
       return { success: false, filename: file.name };
     }
 
@@ -491,7 +528,11 @@ async function handleUploadImages(elements) {
       let url;
       if (service === 'gdrive') {
         const data = await getStorage(['googleDriveSessionId']);
-        url = await uploadToGoogleDrive(file, data.googleDriveSessionId);
+        url = await uploadToGoogleDrive(file, data.googleDriveSessionId, (done, total) => {
+          imageResults.setUploading(id, Math.round((done / total) * 100));
+          progressByFile.set(id, done / total);
+          updateOverallProgress();
+        });
       } else if (service === 'vgy') {
         const data = await getStorage(['vgyApiKey'], 'sync');
         url = await uploadToVgy(file, data.vgyApiKey);
@@ -506,11 +547,18 @@ async function handleUploadImages(elements) {
       });
 
       imageResults.setDone(id, url);
+      progressByFile.set(id, 1);
+      updateOverallProgress();
+      if (pendingId && imagePending) {
+        imagePending.remove(pendingId);
+      }
       return { success: true, url, filename: file.name };
     } catch (error) {
       await logErrorMessage(`Failed to upload ${file.name}`, error);
+      progressByFile.set(id, 1); // counted as processed for the bar
+      updateOverallProgress();
       imageResults.setFailed(id, error.message, async () => {
-        const retry = await uploadSingle(file, id);
+        const retry = await uploadSingle(entry);
         if (retry.success) {
           uploadedFiles.add(retry.filename);
           await setStorage({ uploadedImageFiles: Array.from(uploadedFiles) });
@@ -523,23 +571,21 @@ async function handleUploadImages(elements) {
 
   try {
     // Process files in batches with concurrency limit
-    for (let i = 0; i < filesToUpload.length; i += CONCURRENCY_LIMIT) {
-      const batch = filesToUpload.slice(i, i + CONCURRENCY_LIMIT);
-      const batchIds = fileIds.slice(i, i + CONCURRENCY_LIMIT);
+    for (let i = 0; i < uploadEntries.length; i += CONCURRENCY_LIMIT) {
+      const batch = uploadEntries.slice(i, i + CONCURRENCY_LIMIT);
 
       const batchResults = await Promise.allSettled(
-        batch.map((file, batchIndex) => uploadSingle(file, batchIds[batchIndex]))
+        batch.map(entry => uploadSingle(entry))
       );
 
       for (const settledResult of batchResults) {
-        completed++;
-        updateProgress(completed, filesToUpload.length, `Uploaded ${completed}/${filesToUpload.length}`, elements.progressFill, elements.progressText);
-
         if (settledResult.status === 'fulfilled' && settledResult.value.success) {
           uploadedFilenames.push(settledResult.value.filename);
         }
       }
     }
+
+    updateOverallProgress('Upload complete!');
 
     // Mark files as uploaded
     uploadedFilenames.forEach(filename => uploadedFiles.add(filename));
@@ -550,19 +596,14 @@ async function handleUploadImages(elements) {
       await updateImageFiles(elements);
     }
 
-    // Clear file input
-    if (elements.fileInput) {
-      elements.fileInput.value = '';
-    }
-
     const successCount = uploadedFilenames.length;
-    showStatus(`Successfully uploaded ${successCount}/${filesToUpload.length} images!`, StatusType.SUCCESS, getStatusElement());
+    showStatus(`Successfully uploaded ${successCount}/${uploadEntries.length} images!`, StatusType.SUCCESS, getStatusElement());
 
     setTimeout(() => {
       elements.progress.style.display = 'none';
     }, 2000);
 
-    await logInfo('Image upload completed', { total: filesToUpload.length, success: successCount });
+    await logInfo('Image upload completed', { total: uploadEntries.length, success: successCount });
   } catch (error) {
     showStatus('Upload failed: ' + error.message, StatusType.ERROR, getStatusElement());
     await logErrorMessage('Image upload failed', error);
@@ -739,6 +780,7 @@ function getElements() {
     progressText: document.getElementById('image-progress-text'),
     outputSection: document.getElementById('image-output-section'),
     resultsList: document.getElementById('image-results'),
+    pendingList: document.getElementById('image-pending-files'),
     copyBtn: document.getElementById('image-copy-btn'),
     gdriveConnection: document.getElementById('image-gdrive-connection'),
     gdriveConnect: document.getElementById('image-gdrive-connect'),
